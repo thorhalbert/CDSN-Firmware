@@ -1,5 +1,5 @@
 # CDSN-Firmware
-China Digital Seismic Network (CDSN) Station Firmware
+China Digital Seismic Network (CDSN) Station Firmware - https://www.fdsn.org/networks/detail/CD/
 
 This software was developed by me for the Albuqerque Seismological Laboratory (part of the USGS) from 1985 to about 1987.
 
