@@ -1,0 +1,326 @@
+.AP
+.F
+.FL HYPHENATE
+.FL CAPITALIZE
+.HY
+.PR
+.J
+.PS 60,80
+.LM 12
+.RM 70
+.c;Parameters Used to Tune the Event Detector
+.c;and an Explanation of the Onset Data Printout
+.sk 1
+.p 5,1,4
+The purpose of this section is to describe the parameters that may be
+input to the event detector to change its performance.  These
+parameters are described in more detail in the USGS open file report
+83-785 by James N. Murdock and Charles R. Hutt. 
+They are
+described herewith as parameters used to monitor the amplitude of a
+signal and as parameters used to monitor the frequency content of a
+signal.
+.sk 1
+.c;Parameters Used to Monitor the Amplitude of a Signal
+.c;NOTE: All of these parameters are octal (base 8) numbers
+.sk 1
+.lm +10
+.p -10,1,4
+XTH1######Xth1 is an octal code that defines the factor (see table 1)
+of "twosd." Twosd is a measure of the seismic background noise that is
+output by the filter of each detector. (The responses of the
+respective filters are represented in figures 1 and 2.) Xth1 is used
+is used to calculate a threshold value: th1, such that th1 _= xth1 x
+twosd. As described in the Open File Report (on page 14), An event
+will be declared if one amplitude value of the signal is greater than
+th1 and two other amplitude values are greater than th2, assuming that
+all of the amplitude values pass the tests described in "Parameters
+Used to Monitor the Frequency Content of a Signal."
+
+XTH2######Xth2 defines threshold th2 in the same manner as xth1
+defines th1: th1 _= xth2 x twosd.  One way a signal can be detected is
+described above.  A signal may be detected in another way as well:
+Assuming the frequency criteria have been met, an event will be
+declared when "n__hits" values are greater than th2.  In the Open File
+Report, n__hits was fixed at the value 4 (page 14).  The parameter
+n__hits is now tunable, it must be given a value greater than, or equal
+to, 4 decimal.
+
+XTH3######Xth3 defines threshold th3 in the same manner as the above
+thresholds: th3 _= xth3 x twosd.  As described in the Open File Report
+(page 15), th3 is used to search for the onset of a signal. Typically
+th3 is set to 10 (octal).  For proper operation of the detector, xth1
+> xth2 >_= xth3.
+
+XTHX######Xthx similarly defines a threshold, thx, such that thx _= xthx
+x twosd.  Thx is used to keep unusually large values from being
+included in the computation of twosd: Values larger that thx are not
+used to compute the estimate of the amplitude of the background
+noise, this keeps spikes from raising the thresholds.  In normal
+operation, xthx should be set no smaller than 14 (octal).
+.lm -10
+.sk 1
+.c;Parameters Used to Monitor Frequency Content
+.c;NOTE: These parameters are expressed in decimal (base 10)
+.sk 1
+.p 5,1,4
+It is important to remember that the detector monitors the amplitudes
+of the background noise and signals in much the same way as a
+seismologist might view a seismogram: The detector analyses the
+amplitudes (that is, the peak to trough differences) of the digital
+seismic data.  In other words, in contrast to the typical power level
+detector, the analyses are performed in the time domain, rather than
+primarily in the frequency domain.
+.lm +10
+.p -10,1,4
+FILHI#####Filhi is used to ensure that the amplitudes of a candidate
+signal are not too close together.  The units of filhi are in samples.
+Filhi can be used to help reduce the effect of spikes and man-made
+(cultural) noises.  As an example of how filhi works, for filhi _= 8,
+if two amplitude values (each greater than th2) are closer together
+than 8 samples, the second amplitude value will not be used to help
+trigger the detector:  Filhi will cause rejection of the second
+amplitude value.
+
+FILLO#####Fillo is used to ensure that the amplitudes of a candidate
+signal are not too far apart.  The units of fillo are in samples.
+Fillo is used to help reduce the effect of earth noise.  As an example
+of how fillo works, for fillo _= 40, if two sucessive amplitude values
+(each greater than th2) are farther apart than 40 samples, the first
+amplitude value will not be used to help trigger the detector:  Fillo
+will cause rejection of the first amplitude value.  Indeed, the
+beginning of the time window (described below) will be moved to the
+time of the second amplitude value.
+
+IWIN######Iwin is another time window.  The units of iwin are in
+samples.  (Typically, a window is 4 to 10 seconds long.)  When the
+first amplitude of a candidate signal exceeds th2, the window begins
+at the time of this amplitude.  If the subsequent amplitudes meet the
+constraints of filhi and fillo, a signal will be declared, if, in the
+window, n__hits amplitudes are greater than th2, or if three amplitudes
+are greater than th2 with one of them being greater than th1.
+
+N__HITS####N__hits are the number of peak to trough values with 
+amplitudes greater than th2, but less than th1, that are required
+to trigger an event.  N__hits must be
+equal to, or greater than, 4 decimal.
+.sk 1
+.lm -10
+.c;Summary of Relationships and Limits
+.SK 1
+.lm +10
+.p 0,0,4
+xth1 > xth2 >_= xth3; xth1 _<_= 177 (all in octal)
+
+xthx > 14 (octal)
+
+iwin >_= fillo > filhi (decimal)
+
+n__hits >_=4 (decimal)
+.lm -10
+.pg
+.c;Values Suggested for Input and some Suggestions on 
+.c;Further Tuning the Detector
+.sk 1
+.p 5,1,0
+The following values are designed to provide detection of all P wave
+signals that are clearly visible on a seismogram display, yet to
+provide for few false alarms in normal operation.
+.sk 2
+.lm +15
+.p 0,0,4
+############SP#######BB
+
+filhi########8########4
+
+fillo#######80#######40
+
+iwin#######160######200
+
+xth1########20#######77
+
+xth2########15#######17
+
+xth3########10#######10
+
+xthx########15#######30
+
+n__hits#######4########5
+.sk 1
+.lm -15
+.p 5,1,4
+If the design goals are not met, adjustment of the parameters may be
+required.  (The best proceedure might be to record continuously so
+that the parameters may be set off line.)  To reduce false alarms,
+one should try raising, and testing the effect of a new setting,  the
+following parameters:
+.lm +20
+.sk 1
+.p -4,0,4
+1.##xth1 
+
+2.##xth2 
+
+3.##xthx
+
+4.##filhi (to decrease effect of cultural noise)
+.sk 1
+.lm -20
+.P 5,1,4
+If clear events are missed, this likely means that they are not
+in-band to the detector (the P-wave signals might have periods that
+are longer than 2 seconds).  Here one might try lowering xth1,
+increasing fillo, and, if necessary, increasing iwin.  Again, the best
+way to tune the detector is offline.  This is the way tuning is usually
+done at ASL.
+.pg
+.c;The Meanings of the Onset Values Output 
+.p 5,1,0
+The following gives the meaning of the different fields printed on the
+console when an event is declared.  Here is an example message:
+.sk 1
+.P 0,0,4
+SP EVENT DETECTED
+
+SP c 00 11999 86 0128 19:48:05.78 00162048 00.25 009054
+.lm +10
+.P -10,1,4
+SP########This denotes what seismometer and band were being monitored
+for events.  For the China System, only two channels are monitored
+(both for the Z component): SP (from the Chinese short period
+seismometers), and BB (from the Swiss seismometers on the Broad Band
+output).
+
+c#########Denotes the polarity of the first break of the signal (a 'c'
+or 'd').
+
+00########The "look back" value which signifies how far the detector
+looked back to find the onset of the signal.  The number will be 00,
+01, or 02 amplitudes (see pg 15 of Open File Report).
+
+11999#####The quality determination of the onset (pg 16 of the Open
+File Report).  An example of a well-determined onset might be 00abc,
+with a look back of 00, where a, b, and c, are greater than 2.  An
+example of a poorly determined onset might be ab1cd, with a look back
+of 01 or 02, where a, b, are 1 or larger, and c and d are any positive
+number within their range.
+
+86########The year part of the time when the onset signal was
+declared.
+
+0128######The day of the year (1 is January 1) of the onset.
+
+19:48:####The hour and minutes of the onset (GMT).
+
+05.78#####Seconds (expressed to two decimal places) of the actual onset wave.
+
+00168827##The maximum amplitude of the first four cycles of the signal
+(measured in digital counts).
+
+00.25#####The average period of the first 4 cycles of the signal (in
+seconds or 1/hz).
+
+009054####The value of "twosd" which is the amplitude of the
+background. This is the value that was used to
+calculate the threshold values th1, th2, th3, and thx for detecting
+the event and timing.
+.LM -10
+.pg
+.c;Actually Setting the CDSN Seismograph with the Console
+.sk 1
+.p 5,1,4
+Whenever the CDSN machine is turned on, rebooted, starts a new tape,
+or when a event parameter is changed, the console will print all of
+the event detector parameters.  This way the Data Management Center
+will have copies of these parameters when the logs are turned in.
+
+The machine automatically comes up in full event detected mode.  This
+means that the signals from the SP and BB are not written
+to tape unless events are detected.  This is the normal operating
+mode.
+
+There are times during testing and tuning when it may be necessary to
+make the machine record all data, and not to use the event detector.
+This is called continuous recording mode.  This should not be used
+except during special situations since the tape cartridges fill up in
+a mere 50 hours causing a station to produce too much data which can
+easily overload the Data Management Center.  The continuous mode may
+be set individually for short period and broad band.  These are set in
+the following way:
+.LM +10
+.SK 1
+.p 0,0,4
+[BBCONT;FF]	(turn on BB continuous)
+
+[SPCONT;FF]	(turn on SP continuous)
+
+[BBCONT;00]	(switch back to event mode)
+
+[SPCONT;00]	(switch back to event mode)
+.LM -10
+.p 0,1,4
+If this is set correctly the machine will respond:
+.LM +10
+.p 0,1,4
+xxCONT DATA-OK*************************
+.LM -10
+.P 5,1,4
+When in continuous mode, the event detector can be run of left off.
+This causes the event detector to simply print out onset messages, but
+does not determine if records should be put on tape.  In continuous
+mode, all records are written to tape.  To turn the event detector on
+or off type in:
+.LM +10
+.SK 1
+.p 0,0,4
+[BBSPEC;FF]	(to turn the BB detector on)
+
+[BBSPEC;00]	(turn the BB detector off)
+
+[SPSPEC;FF]	(turn the SP detector on)
+
+[SPSPEC;00]	(turn the SP detector off)
+.LM -10
+.p 5,1,4
+In all cases if the message was entered correctly, the DATA-OK message
+will appear, otherwise an ERROR message will appear and the command
+should be retyped.
+.P
+There are a series of commands to set the actual event parameters.
+Data are entered in the base which they are supposed to be
+in.  When a value is sucessfully changed (DATA-OK), the event detector
+will print out all of the parameters for that detector.  Here is an
+example of how to set the defaults given earlier.
+.LM +10
+.SK 1
+.P 0,0,4
+[SPFIHI;0008]#######[BBFIHI;0004]
+
+[SPFILO;0080]#######[BBFILO;0040]
+
+[SPIWIN;0160]#######[BBIWIN;0200]
+
+[SPXTH1;0020]#######[BBXTH1;0077]
+
+[SPXTH2;0015]#######[BBXTH2;0017]
+
+[SPXTH3;0010]#######[BBXTH3;0010]
+
+[SPXTHX;0015]#######[BBXTHX;0030]
+
+[SPNHIT;0004]#######[BBNHIT;0005]
+.LM -10
+.P 5,1,4
+Type the commands in one at a time, and pause after typing the final
+'_]' until the DATA-OK message comes out, and the new event parameters
+have printed.
+.P 0,1,4
+NOTE: When adjusting parameters in the field, it is advisable to only
+increase or decrease, by a small amount,  one parameter at time.
+Let the system operate for some time to determine the effectiveness
+of the change.
+.p
+NOTE: When the system is rebooted (for any reason), it forgets
+all of the operator settings, and returns to its initialized defaults.
+The operators must re-enter any changed parameters each time this happens.
+.P

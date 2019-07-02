@@ -1,0 +1,683 @@
+/*----------------------------------------------------------------------*
+ *  C h i n a   D i g i t a l   S e i s m o g r a p h   N e t w o r k	*
+ *									*
+ *	CS86LB.C - Internal programming for 86/14 processor - used	*
+ *	for I/O and device control within task processor.		*
+ *									*
+ *	All variables and subroutines starting with an underline "_"	*
+ *	are internal to the driver and are never to be used in the	*
+ *	portable sections of any other program.				*
+ *----------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------*
+ *	This software was written by Scott Halbert, and Stuart Flicker	*
+ *	of Western Programmers, Inc. of Albuquerque New Mexico,  USA 	*
+ *	for the	Albuquerque Seimological Laboratory (US Geological 	*
+ *	Survey)								*
+ *----------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------*
+ *	Modification and history of CDSN3M.C				*
+ *									*
+ *-----Edit---Date----Who-------Description of changes------------------*
+ *	001 13-Dec-85 SH	Begin coding				*
+ *	002 18-Dec-85 SH	Fix bugs in output - machine wedges	*
+ *	003  9-Jan-86 SH	Fix bug in time output code		*
+ *	004  3-Feb-86 SH	Add the p_lngout routine		*
+ *	005  4-Feb-86 SH	Add a bell to the p_warn routine	*
+ *	006 11-Feb-86 SH	Remove msecs from p_time routine	*
+ *				 Make first time request pause long	*
+ *				This version (V1.0) went to China on	*
+ *				 18-Feb-86, next edit to be V1.1	*
+ *	007 28-Feb-86 SH	Write new number output with better	*
+ *				 ranging functions, put macros in	*
+ *				 csstnd to support old calls		*
+ *	008  7-Mar-86 SH	Make a wrap type function and keep a	*
+ *				 column register			*
+ *	009 21-Mar-86 SH	Add the timer functions			*
+ *	010 25-Mar-86 SH	Add Backtrace functions			*
+ *	011 28-Mar-86 SH	Enter station ID tables			*
+ *	012  7-Apr-86 SH	Fix bug in percentage calc in run times	*
+ *	013  9-May-86 SH	The station id mailbox has changed 	*
+ *				 definition so that now it has the	*
+ *				 decade number in the lsd.  So we	*
+ *				 need to truncate this off.		*
+ *----------------------------------------------------------------------*/
+
+char *cs86lb = "cs86lb V1.1[012]";
+
+#define LIBSRC
+#include "src:csstnd.h"		/* Setup Constants/Configuration */
+#ifdef TIME_TRACK
+#include "src:csstat.h"		/* Statistics collection */
+struct daytrk daytab[WEEK]={0};	/* Where the data goes */
+INT32 trktim=0;			/* The last starting time */
+#endif
+#include "src:csmail.h"		/* Various mail definitions */
+#include "src:cssepk.h"		/* Sensor packet formats */
+
+#ifdef TRACE
+INT16 _tstack = 0;
+TEXT *_namstk[TRACMAX] = 0;;
+#endif
+
+/*----------------------------------------------------------------------*
+ *	Function: VOID lockoff() - Turn off explicit dual port ram lock	*
+ *----------------------------------------------------------------------*
+ *	Set status register to release dual port ram			*
+ *----------------------------------------------------------------------*
+ *	Returns:	VOIDs don't return anything			*
+ *----------------------------------------------------------------------*
+ *	Fatal Errors:	Nothing should fail here			*
+ *----------------------------------------------------------------------*/
+
+VOID lockoff()
+{
+
+	out(0xc9,0x03);			/* Turn on DS3 led */
+
+	return;
+}
+
+/*----------------------------------------------------------------------*
+ *	Function: VOID ledon() - Turn on DS3 LED			*
+ *----------------------------------------------------------------------*
+ *	Turn on led to indicate we are working				*
+ *----------------------------------------------------------------------*
+ *	Returns:	VOIDs don't return anything			*
+ *----------------------------------------------------------------------*
+ *	Fatal Errors:	Nothing should fail here			*
+ *----------------------------------------------------------------------*/
+
+VOID ledon()
+{
+
+	out(0xc9,0x06);			/* Turn on DS3 led */
+
+	return;
+}
+
+/*----------------------------------------------------------------------*
+ *	Function: VOID ledoff() - Turn off DS3 LED			*
+ *----------------------------------------------------------------------*
+ *	Turn off led to indicate we are pausing				*
+ *----------------------------------------------------------------------*
+ *	Returns:	VOIDs don't return anything			*
+ *----------------------------------------------------------------------*
+ *	Fatal Errors:	Nothing should fail here			*
+ *----------------------------------------------------------------------*/
+
+VOID ledoff()
+{
+
+	out(0xc9,0x0e);			/* Turn off DS3 led */
+
+	return;
+}
+/*----------------------------------------------------------------------*
+ *	Function: VOID _p_char(inchar) - Primative to print a character	*
+ *----------------------------------------------------------------------*
+ *	Primative function to output a single character to the printer	*
+ *----------------------------------------------------------------------*
+ *	Arguments:	TEXT inchar - Single character to output	*
+ *----------------------------------------------------------------------*
+ *	Returns:	VOIDs don't return anything			*
+ *----------------------------------------------------------------------*
+ *	Fatal Errors:	Nothing should fail here			*
+ *----------------------------------------------------------------------*/
+
+VOID _p_char(inchar)
+TEXT inchar;
+{
+
+	register INT16 lp;
+	TEXT *optr;
+
+	while (*outlck) 
+		for (lp=0; lp<3000; lp++);
+
+	if (*outtty>OUTMAX) return;	/* Buffer is overflowed - discard */
+
+	optr = *outtty;
+	optr += MBOFF;
+	*optr = inchar;
+	(*outtty)++;
+
+	column++;
+	if (inchar=='\r') column=0;
+
+	return;
+
+}
+
+/*----------------------------------------------------------------------*
+ *	Function: VOID p_disp(texts) - Primative to print a character	*
+ *----------------------------------------------------------------------*
+ *	Primative function to output a single character to the printer	*
+ *----------------------------------------------------------------------*
+ *	Arguments:	TEXT *texts - string terminated by \0		*
+ *----------------------------------------------------------------------*
+ *	Returns:	VOIDs don't return anything			*
+ *----------------------------------------------------------------------*
+ *	Fatal Errors:	Nothing should fail here			*
+ *----------------------------------------------------------------------*/
+
+VOID p_disp(texts)
+TEXT *texts;
+{
+	
+	INT16 strln;
+
+	for (strln=0; *(texts+strln)!='\0'; strln++);
+
+	if (column+strln>margin && column>11) {
+		column=0;
+		p_cont();
+	}
+
+	while (*texts!='\0') _p_char(*(texts++));
+
+	return;
+
+}
+
+/*----------------------------------------------------------------------*
+ *	Function: VOID  p_number(dnum,base,min,zer) - Output number	*
+ *----------------------------------------------------------------------*
+ *	output a number via _p_char(), allows left and right 		*
+ *	justification and zero filling 					*
+ *----------------------------------------------------------------------*
+ *	Arguments:	INT32 dnum - number to be outed			*
+ *			INT16 base - base to be used while printing	*
+ *			INT16 min - column size positive is right	*
+ *					justified, negative is left	*
+ *					if number is bigger than 	*
+ *					column it gets truncated	*
+ *			BOOL zer - TRUE zero fill otherwise not		*
+ *----------------------------------------------------------------------*
+ *	Returns:	VOIDs don't return anything			*
+ *----------------------------------------------------------------------*
+ *	Fatal Errors:	Nothing should fail here			*
+ *----------------------------------------------------------------------*/
+
+VOID p_number(dnum,base,min,zer)
+INT32 dnum;
+INT16 base,min;
+BOOL zer;
+{
+
+#define MAXNUM 40
+
+	INT16 i,j,k,sign;
+	TEXT ochar;
+	TEXT disarr[MAXNUM*2];
+
+	if (zer&&min<=0) zer=FALSE;		/* only works with a min */
+	if (min>(MAXNUM-1)) min=MAXNUM-1;
+	if (min<-(MAXNUM-1)) min=(-(MAXNUM-1));
+
+	ochar=' ';
+	if (zer) ochar='0';
+	for(i=0; i<MAXNUM; i++) disarr[i]=ochar;
+	for(i=MAXNUM; i<MAXNUM*2; i++) disarr[i]=' ';
+
+	sign=1;
+	if (dnum<0) {
+		sign=-1;
+		dnum=-dnum;
+	}
+
+	i=MAXNUM;
+
+	do {
+		ochar = dnum%base;
+		dnum = dnum/base;
+	
+		if (ochar<'\012') ochar+='0';
+		else ochar+=('A'-'\012');
+	
+		disarr[--i]=ochar;
+
+	} while (dnum>0&&i>0);
+
+	if (sign==-1) {
+		if (!zer||min<=0) disarr[--i]='-';
+		else {
+			k=MAXNUM-min;
+			if (k<=i) disarr[k]='-';
+		}
+	}
+
+/*	Following cases determine justifications
+	min	Action
+	0	Print out number with no justification
+	<0	Left justify column width -min
+	>0	right justify column width min		*/
+
+	j=i;			/* Assume we start at beginning */
+	if (min>0) j=MAXNUM-min; /* Start at left column start */
+	if (min<0) j=i;		/* Start at number beginning */
+
+	k=MAXNUM-1;		/* Assume we end at number end */
+	if (min<0) k=j-min-1;	/* End at end+leftover */
+
+	for (i=j; i<=k; i++) _p_char(disarr[i]);
+
+	return;
+
+}
+/*----------------------------------------------------------------------*
+ *	Function: VOID _dsptim() - query the master for the time 	*
+ *----------------------------------------------------------------------*
+ *	put a descriptive message of the time on the console 		*
+ *----------------------------------------------------------------------*
+ *	Returns:	VOIDs don't return anything			*
+ *----------------------------------------------------------------------*
+ *	Fatal Errors:	Nothing should fail here			*
+ *----------------------------------------------------------------------*/
+
+VOID _dsptim()
+{
+
+#define nibmsk 0xF				/* Four bit nibble mask */
+#define lefnib(c)	((timbuf[c]>>4)&nibmsk) /* Get the left nibble */
+#define rignib(c)	(timbuf[c]&nibmsk)	/* Right half nibble */
+#define zer '0'					/* Zero constant */
+#define TIMMAX 200
+
+	register INT16 lp,tr;
+	INT16 timax;
+
+	timax = TIMMAX;
+
+	for (lp=0; lp<6; lp++) timbuf[lp]=0;
+	
+	*timreq=0xFF;
+
+	tr = 0;
+	while (*timreq) {
+		if (tr++>timax) {
+		    tr=0;
+		    break;
+		}
+		for (lp=0; lp<3000; lp++);
+	}
+
+	if (tr!=0) {
+
+		_p_char(lefnib(5)+zer);
+		_p_char(' ');
+		_p_char(rignib(5)+zer);
+		_p_char(lefnib(4)+zer);
+		_p_char(rignib(4)+zer);
+		_p_char(' ');
+		_p_char(lefnib(3)+zer);
+		_p_char(rignib(3)+zer);
+		_p_char(':');
+		_p_char(lefnib(2)+zer);
+		_p_char(rignib(2)+zer);
+		_p_char(':');
+		_p_char(lefnib(1)+zer);
+		_p_char(rignib(1)+zer);
+/*		_p_char('.');
+		_p_char(lefnib(0)+zer);
+		_p_char(rignib(0)+zer);		[006] Leave these out */
+		p_disp(" - ");
+	} else {
+		p_disp("<No Time> - ");
+	}
+	
+}
+
+/*----------------------------------------------------------------------*
+ *	Function: VOID p_warn(mess) - print the time and then message	*
+ *----------------------------------------------------------------------*
+ *	put a descriptive message and the time on the console 		*
+ *----------------------------------------------------------------------*
+ *	Arguments:	TEXT *mess - message to print out		*
+ *----------------------------------------------------------------------*
+ *	Returns:	VOIDs don't return anything			*
+ *----------------------------------------------------------------------*
+ *	Fatal Errors:	Nothing should fail here			*
+ *----------------------------------------------------------------------*/
+
+VOID p_warn(mess)
+TEXT *mess;
+{
+
+	_p_char('\n');
+	_p_char('\r');
+	_p_char((TEXT) 07);		/* [005] Output an ascii bell */
+	_p_char((TEXT) 07);		/* [005] Output an ascii bell */
+	_dsptim();			/* Output the time to the console */
+
+	p_disp(mess);
+
+}
+VOID p_crlf()
+{
+
+	_p_char('\n');
+	_p_char('\r');
+	return;
+
+}
+VOID p_cont()
+{
+	p_crlf();
+	p_disp(" ---------");
+	return;
+}
+
+/*----------------------------------------------------------------------*
+ *	Function: VOID p_fatal(sub,mess) - die and print message	*
+ *----------------------------------------------------------------------*
+ *	die and print a descriptive message on console			*
+ *----------------------------------------------------------------------*
+ *	Arguments:	TEXT *subr - subroutine machine dies in		*
+ *			TEXT *mess - message to print out		*
+ *----------------------------------------------------------------------*
+ *	Returns:	VOIDs don't return anything			*
+ *----------------------------------------------------------------------*
+ *	Fatal Errors:	Nothing should fail here			*
+ *----------------------------------------------------------------------*/
+
+VOID p_fatal(sub,mess)
+TEXT *sub,*mess;
+{
+
+	p_crlf();
+	p_crlf();
+	p_disp("***********86/14 Fatal error has occured**************");
+	p_crlf();
+	p_warn("Subroutine: [");
+	p_disp(sub);
+	p_disp("] - ");
+	p_disp(mess);
+	p_crlf();
+	p_disp("*************86/14 processor is down******************");
+	p_crlf();
+	p_crlf();
+
+	FOREVER;
+
+}
+
+VOID g_time(curstr)
+struct r_time *curstr;
+{
+
+#define nibmsk 0xF				/* Four bit nibble mask */
+#define lefnib(c)	((timbuf[c]>>4)&nibmsk) /* Get the left nibble */
+#define rignib(c)	(timbuf[c]&nibmsk)	/* Right half nibble */
+#define zer '0'					/* Zero constant */
+#define TIMMAX 200
+
+	register INT16 lp,tr;
+	INT16 timax;
+
+	timax = TIMMAX;
+
+	for (lp=0; lp<6; lp++) timbuf[lp]=0;
+	
+	*timreq=0xFF;
+
+	tr = 0;
+	while (*timreq) {
+		if (tr++>timax) {
+		    tr=0;
+		    break;
+		}
+		for (lp=0; lp<3000; lp++);
+	}
+
+	if (tr!=0) {
+
+		curstr->day_yr=0;			/* No leap years */
+		curstr->yr=lefnib(5);			/* Least sig o year */
+		curstr->day=(rignib(5)*100)+(lefnib(4)*10)+rignib(4);
+							/* Day of year */
+		curstr->hr=(lefnib(3)*10)+rignib(3);	/* Hours */
+		curstr->min=(lefnib(2)*10)+rignib(2);	/* Mins */
+		curstr->sec=(lefnib(1)*10)+rignib(1);	/* Secs */
+		curstr->msec=(lefnib(0)*100)+(rignib(0)*10); /* Msecs */
+
+	} else {
+		curstr->day_yr=0;
+		curstr->yr=0;
+		curstr->day=0;
+		curstr->hr=0;
+		curstr->min=0;
+		curstr->sec=0;
+		curstr->msec=0;
+	}
+
+	return;
+
+}
+
+VOID p_time(curtim)
+struct r_time *curtim;
+{
+	
+	p_number((INT32) curtim->yr,10,0,FALSE);	p_disp(" ");
+	p_number((INT32) curtim->day,10,3,TRUE);	p_disp(" ");
+	p_number((INT32) curtim->hr,10,2,TRUE);		p_disp(":");
+	p_number((INT32) curtim->min,10,2,TRUE);	p_disp(":");
+	p_number((INT32) curtim->sec,10,2,TRUE);
+
+	return;
+
+}
+
+#ifdef TIME_TRACK
+struct r_time nowtime={0};
+
+INT32 timspc()
+{
+
+	INT32 curtim;
+
+	g_time(&nowtime);
+
+	curtim=nowtime.hr;	curtim*=60;
+	curtim+=nowtime.min;	curtim*=60;
+	curtim+=nowtime.sec;	curtim*=1000;
+	curtim+=nowtime.msec;
+
+	return(curtim);
+}
+
+VOID rolldown()
+{
+
+	int i,j;
+
+	for (i=1;i<WEEK;i++) {
+
+		daytab[i-1].daynum=daytab[i].daynum;
+		daytab[i-1].starno=daytab[i].starno;
+		daytab[i-1].endno=daytab[i].endno;
+
+		for (j=0; j<TIMERS; j++) 
+			daytab[i-1].timdir[j]=daytab[i].timdir[j];
+
+	}
+
+	i=TODAY;
+
+	daytab[i].daynum=0;
+	daytab[i].starno=0;
+	daytab[i].endno=0;
+	for (j=0; j<TIMERS; j++)
+		daytab[i].timdir[j]=0;
+
+}
+
+VOID star_timer(event_name)
+INT16 event_name;
+{
+
+	INT32 curtim;
+	VOID dump_timer();
+
+	curtim=timspc();
+
+	if (daytab[TODAY].daynum!=nowtime.day) {
+		dump_timer();
+		rolldown();
+		daytab[TODAY].daynum=nowtime.day;
+		daytab[TODAY].starno=curtim;
+	}
+
+	trktim=curtim;
+}
+
+VOID end_timer(event_name)
+INT16 event_name;
+{
+
+	INT32 curtim,eventim;
+
+	curtim=timspc();
+
+	if (daytab[TODAY].daynum!=nowtime.day) {	/* Day wrap */
+		daytab[TODAY].endno=WHOLEDAY;
+		daytab[TODAY].timdir[event_name]+=daytab[TODAY].endno-trktim;
+
+		dump_timer();
+		rolldown();
+		daytab[TODAY].daynum=nowtime.day;
+		daytab[TODAY].starno=0;
+		trktim=0;
+
+	}
+
+	daytab[TODAY].endno=curtim;
+	daytab[TODAY].timdir[event_name]+=daytab[TODAY].endno-trktim;
+}
+
+VOID dis_timer(intval,tottim)
+INT32 intval,tottim;
+{
+
+	INT16 hours,mins,secs,msecs;
+	INT32 pct;
+	
+	pct=intval/(tottim/100L);		/* [012] */
+
+	msecs=intval%1000L;	intval/=1000L;
+	secs=intval%60L;	intval/=60L;
+	mins=intval%60L;		
+	hours=intval/60L;
+
+	p_number((INT32) hours,10,2,TRUE);	p_disp(":");
+	p_number((INT32) mins,10,2,TRUE);	p_disp(":");
+	p_number((INT32) secs,10,2,TRUE);	p_disp(".");
+	p_number((INT32) msecs,10,3,TRUE);	p_disp("  ");
+	p_number((INT32) pct,10,3,FALSE);	p_disp("%");
+}
+	
+VOID dump_timer()
+{
+
+	INT32 moh,run,temp;
+
+	moh=daytab[TODAY].endno-daytab[TODAY].starno;
+	if (moh==0) return;
+	run=0;
+
+	p_warn("Runtime statistics collected for day ");
+	p_numout(daytab[TODAY].daynum,10);
+	p_cont();
+	p_disp("Time spent waiting for tapes ");
+	dis_timer(temp=daytab[TODAY].timdir[WAITTP_TIMER],moh);
+	run+=temp;
+	p_cont();
+	p_disp("Time spent writing tapes     ");
+	dis_timer(temp=daytab[TODAY].timdir[WRTTAP_TIMER],moh);
+	run+=temp;
+	p_cont();
+	p_disp("Time spent event detecting   ");
+	dis_timer(temp=daytab[TODAY].timdir[EVENTD_TIMER],moh);
+	run+=temp;
+	p_cont();
+	p_disp("Time spent housekeeping      ");
+	dis_timer(temp=daytab[TODAY].timdir[HOUSKP_TIMER],moh);
+	run+=temp;
+	p_cont();
+	p_disp("Idle and misc overhead       ");
+	dis_timer(moh-run,moh);
+	p_cont();
+	p_disp("----------------------Total: ");
+	dis_timer(moh,moh);
+	p_crlf();
+}
+#endif
+
+#ifdef TRACE
+VOID _bak_trace()
+{
+
+	INT16 t;
+
+	p_disp("trace: ");
+	for (t=0; t<_tstack; t++) {
+		if (t!=0) p_disp("/");
+		p_disp(_namstk[t]);
+	}
+}
+#endif
+
+#define lefnib(c)	((statid[c]>>4)&nibmsk) /* Get the left nibble */
+#define rignib(c)	(statid[c]&nibmsk)	/* Right half nibble */
+
+station_id()
+{
+
+	INT16 station;
+
+	station=lefnib(0) * 1000;
+	station+=rignib(0) * 100;
+	station+=lefnib(1) * 10;
+	station+=rignib(1);
+
+	station/=10;		/* [013] */
+
+	p_crlf();
+
+	p_disp("*** China Digital Seismic Network Station ");
+	column=0;
+
+	p_numout(station,10); p_disp(" ");
+
+	switch(station) {
+
+	case 100:	p_disp("- ASL Albuquerque, NM USA ");
+			break;
+	case 101:	p_disp("- Beijing, China ");
+			break;
+	case 102:	p_disp("- Lanzhou, China ");
+			break;
+	case 103:	p_disp("- Enshi, China ");
+			break;
+	case 104:	p_disp("- Kunming, China ");
+			break;
+	case 105:	p_disp("- Qiongzhong, China ");
+			break;
+	case 106:	p_disp("- Sheshan, China ");
+			break;
+	case 107:	p_disp("- Urumqi, China ");
+			break;
+	case 108:	p_disp("- Hailar, China ");
+			break;
+	case 109:	p_disp("- Mudanjiang, China ");
+			break;
+	case 120:	p_disp("- Depot Repair ");
+			break;
+
+	}
+
+	p_disp("***");
+	p_crlf();
+}

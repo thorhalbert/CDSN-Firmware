@@ -1,0 +1,49 @@
+\begin{verbatim}
+.; Build CDSN package and burn proms in a DATA I/O 29 series programmer
+.;
+        .ENABLE QUIET
+        SET TT: QUIET
+        ;
+        ;'<TIME>'       Clean up a bit
+        DEL/INFO/NOQ *.BAK
+        DEL/INFO/NOQ CDSN.(WSL,MAP,HEX,LDA,STB)
+        DEL/INFO/NOQ T:(*.MAP,*.HEX,*.S,*.TMP)
+        ;'<TIME>'       Link Main program section
+
+        .OPEN LINK.TMP
+        .DATA DY1:csinit.o
+        .DATA DY1:csmain.o
+        .DATA DY1:cs3mio.o
+        .DATA DY1:csevdt.o
+        .DATA DY1:cs86lb.o
+        .DATA DY1:lbpdsf.86
+        .CLOSE  
+
+        .OPEN TEMP.TMP
+        .DATA run t:LNK
+        .DATA -db0x8000 -ett_e -sdd_s -tb0x0000 -o dy1:cdsn.tmp -i <link.tmp
+        .CLOSE
+
+        SQ T:/NOQ
+        SQ DK:/NOQ
+        $@TEMP.TMP
+        COPY DY1:CDSN.TMP CDSN.WSL
+        DELETE DY1:CDSN.TMP
+        SQ T:/NOQ
+        SQ DK:/NOQ
+        .IF <EXSTAT> <> 1 .STOP
+        DELETE LINK.TMP
+
+        ;'<TIME>'       Produce Main Link Map
+        .OPEN TEMP.TMP
+        .DATA run t:rel
+        .DATA -std cdsn.wsl >cdsn.map
+        .CLOSE
+
+        $@TEMP.TMP
+
+.FINISH:
+        SET TT: NOQUIET
+        .EXIT
+
+\end{verbatim}

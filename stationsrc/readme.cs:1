@@ -1,0 +1,34 @@
+China Data system diskette for 86/14 CPU
+
+README.CS - China system 86/14 directory (this file)
+
+CSBOOT.S86 - Initial boot transfer code
+
+CSINIT.S86 - Initialization after boot
+
+CSCONF.H - PROM configuration
+CSSTND.H - Project standards definition
+CSMAIL.H - CDSN system mailbox definitions
+CSSTAT.H - Statistical Collections
+
+CSMAIN.C - Mainline Collector Code
+
+CS3MIO.H - 3M tape drive public constants and definitions
+CS3MCF.H - Configuration for this 3M subsystem
+
+CS3MIO.C - Standard Tape driver for 3M subsystems
+
+CSFILT.H - Filter package definition
+CSCONT.H - Detector context definition
+CSSEPK.H - Sensor packet definition
+
+CSEVDT.C - Event detector and related subroutines
+
+CS86LB.C - 86/14 internal subroutine library
+
+CLEAN.COM - Command file to remove all built materials
+
+CDSN.COM - IND command file to build system
+CSCOMP.COM - IND command file to compile and assemble pieces
+CSLINK.COM - IND command file to prepare link outputs
+CSBURN.COM - IND command file to burn proms on Data I/O 29A programmer

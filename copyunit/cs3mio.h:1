@@ -1,0 +1,166 @@
+/*----------------------------------------------------------------------*
+ *  C h i n a   D i g i t a l   S e i s m o g r a p h   N e t w o r k	*
+ *     iSBC 86/14 - Project Recorder Handling and Event Detection	*
+ *----------------------------------------------------------------------*
+ *	CS3MIO.H - Fixed constants, and other definitions for the 3M	*
+ *	HCD-75 cartridge tape drive running on the iSBX 217B interface	*
+ *----------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------*
+ *	This software was written by Scott Halbert for the Albuquerque	*
+ *	Seismological Laboratory (US Geological Survey).		*
+ *----------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------*
+ *	Modification and history of CS3MIO.H				*
+ *									*
+ *-----Edit---Date----Who-------Description of changes------------------*
+ *	001  8-Jul-85 SH	Beginning of Systems Analysis		*
+ *	002 31-Jul-85 SH	Break out configuration info		*
+ *	003 16-Jan-86 SH	Put in write and error counts		*
+ *	004  3-Feb-86 SH	Add _hold_er for not printing errors	*
+ *	005 10-Feb-86 SH	Make _recnt a long			*
+ *	006 10-Mar-86 SH	Make a read/write flag for _iobuf	*
+ *	007 13-Mar-86 SH	Add error statistics registers		*
+ *	008 18-Apr-86 SH	Move RETRY_Q from here to CSCONF.H	*
+ *----------------------------------------------------------------------*/
+
+#define BUF_EOF 0x0001
+#define BUF_RDE 0x0002
+
+/*----------------------3M Tape drive I/O Vector------------------------*/
+
+struct _tape3m {		/* 3M tape drive status IOV */
+	BYTE _sbx_prt;		/* SBX port which controller in */
+	BYTE _drive_u;		/* Tape drive unit number */
+	BYTE _upi_sp;		/* UPI Status port location */
+	BYTE _drv_st;		/* Drive Status port location */
+	BYTE _datap;		/* Data Port location */
+	WORD _block;		/* Block Last written/read */
+	BYTE _track;		/* Track Last written/read */
+	WORD _mblock;		/* Max number blocks for this tape */
+	BYTE _mtrack;		/* Max number tracks for this tape */
+	DWORD _recnt;		/* Number of good tape blocks written */
+	WORD _wrter;		/* Number of bad tape blocks skipped */
+	struct r_time _begtim;	/* Time tape drive was opened */
+#ifdef ERRSTAT
+	WORD _datcom;		/* Data compare error count */
+	WORD _keycom;		/* Key compare error count */
+	WORD _framer;		/* Number of frame errors */
+#endif
+};
+
+typedef struct _tape3m TAPE;	/* Define the TAPE IOV (typedef) */
+
+/*--------------------Standard definitions and constants--------------------*/
+
+#define MAX_U3M 4		/* Maximum possible 3M tape units per ctl */
+#define MAX_B3M 4095		/* 4096 blocks per track (DC600HC cartridge)*/
+#define MAX_T3M 15		/* There are always 16 tracks */
+
+#define FST_BLK 0		/* What tape block to write first (track 0) */
+
+#define MAX_SNS 6		/* Maximum sense bytes (inclusive of count) */
+
+#define LOW_TRK 12		/* What track to start needing other drive */
+#define EOT_LOW 200		/* Blocks before phys EOT to declare EOT */
+
+#define IO_READ 0		/* _iobuf is going to read */
+#define IO_WRITE 1		/* _iobuf is going to write */
+
+/*--------------------UPI Status Port Definitions---------------------------*/
+
+#define UP_OBF   0x01		/* Output Buffer Full [UBI_SP B0] */
+#define UP_IBF   0x02		/* Input Buffer Full  [UBI_SP B1] */
+#define UP_SOD   0x80		/* Buffer Ready       [UBI_SP B7] */
+
+#define BSZ_3M 1024		/* Preformatted HCD-75 block size */
+
+/*--------------------iSBX 217B Commands (for 3M)---------------------------*/
+
+#define CM_RESET 0x00		/* Reset iSBX 217B board */
+#define CM_INIT  0x01		/* Initialize Drive */
+#define CM_WRITE 0x02		/* Write a block */
+#define CM_MARK  0x03		/* Write a file mark */
+#define CM_READ  0x04		/* Read a block */
+#define CM_STAT  0x06		/* Read Status */
+#define CM_FLAP  0x0C		/* Unload and unlock drive */
+#define CM_CONTI 0x14		/* Continue operation */
+#define CM_WRAM  0x15		/* Write RAM (diagnostic) */
+#define CM_RRAM  0x16		/* Read RAM (diagnostic) */
+#define CM_VERI  0x17 		/* Verify (diagnostic) */
+#define CM_SOT   0x40		/* Start of Transfer (syncronize) */
+#define CM_EOT   0x80		/* End of Transfer (syncronize) */
+
+/*-------------------------Sense Bytes definition-------------------------*/
+
+/*	Sense Byte 0 contains number of valid sense bytes exclusive */
+
+/*	Sense Byte 1 Bits	*/
+
+#define E1_CHKSM 0x01		/* Error in iSBX 217B (bad) */
+#define E1_DNR   0x02		/* Drive not ready or not inited */
+#define E1_HDE   0x04		/* Hard data error during R/W */
+#define E1_FAULT 0x20		/* Drive Fault */
+#define E1_WRPT  0x40		/* Drive Write Protected */
+#define E1_CNP   0x80		/* Cartridge not present */
+
+/*	Sense Byte 2 Bits	*/
+
+#define E2_BNF   0x01		/* Block not found */
+#define E2_TLE   0x02		/* Transfer Length Error */
+#define E2_CMDE  0x08		/* Command Error */
+#define E2_IFUN  0x10		/* Invalid Function error */
+#define E2_BOT   0x40		/* Beginning of tape */
+
+/*	Sense Byte 3 Bits	*/
+
+#define E3_TMSK  0x0F		/* Mask for extracting the track number */
+#define E3_FMK   0x20		/* File mark detected */
+#define E3_EOT   0x40		/* Logical End of tape detected */
+
+/* 	Sense Byte 4 is the low order block number (0-7 bits) */
+
+#define E4_BMSK  0xFF		/* Mask for the low order block number */
+
+/*	Sense Byte 5 contains the high order part thus: */
+
+#define E5_BMSK  0x0F		/* The high order part (bits 8-11) */
+
+/*-----------------------Public Device Registers---------------------------*/
+
+/*	Define the visible error registers - taperr	*/
+
+#define ER_HWE   0x01		/* A fatal hardware error has occured */
+#define ER_HDE   0x02		/* Hardware data error during last I/O */
+#define ER_DNR   0x04		/* Drive is not yet ready */
+#define ER_NCP   0x08		/* No cartridge present in drive */
+
+/*	Define the visible status registers - tapsts	*/
+
+#define ST_WTP   0x02		/* Drive write protected (don't write) */
+#define ST_BOT   0x04		/* Beginning of tape detected */
+#define ST_EOT   0x08		/* End of tape detected */
+#define ST_SOK   0x10		/* On init - subsystem ok */
+#define ST_EDT   0x20		/* Automatic End of Tape detected */
+#define ST_AET   0x40		/* Approaching end of tape */
+#define ST_EOF	 0x80		/* Tape mark seen reading tape */
+
+/*--------------------Predefinitions, and externs-------------------------*/
+
+#ifndef _tapdef
+extern WORD taperr,tapsts;
+extern WORD _hold_er;
+
+/*	Pre-define our functions in cdsn3m.c so no errors (for lint)	*/
+
+extern TAPE *tape_open();	/* Open and init a given tape drive */
+extern BOOL _printm;
+
+#else
+
+WORD _hold_er = {FALSE};
+WORD taperr = {0};
+WORD tapsts = {0};
+
+#endif

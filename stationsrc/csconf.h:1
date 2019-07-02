@@ -1,0 +1,74 @@
+/*----------------------------------------------------------------------*
+ *  C h i n a   D i g i t a l   S e i s m o g r a p h   N e t w o r k	*
+ *     iSBC 86/14 - Project Recorder Handling and Event Detection	*
+ *----------------------------------------------------------------------*
+ *	CSCONF.H - PROM Configuration/build criteria			*
+ *----------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------*
+ *	This software was written by Scott Halbert for the Albuquerque	*
+ *	Seismological Laboratory (US Geological Survey).		*
+ *----------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------*
+ *	Modification and history 					*
+ *-----Edit---Date----Who-------Description of changes------------------*
+ *	000 13-Jun-85 SH	New Template				*
+ *	001 10-Apr-86 SH	Begin History				*
+ *	002 18-Apr-86 SH	Move RETRY_Q into here			*
+ *	003 12-May-86 SH	Reconfigure for china trip on 19-May	*
+ *----------------------------------------------------------------------*/
+
+#define CDSN		/* China Project Configuration */
+#define RSTN		/* Data is RSTN format gain ranged */
+
+/* #define ADVTAPF */	/* Utilize advanced 3M tape commands */
+
+/* #define TRACE */	/* Turn on backtrace list on errors */
+/* #define TRACMAX 50 *//* Maximum trace stack depth */
+
+/* #define EXTEVPAR */	/* Print out extended event parameters */
+
+#define RETRY_Q 3	/* Number of times bad blocks are retried */
+#define TRACKT		/* Print messages as tracks cycle */
+#define DISBADS		/* Display bad block locations */
+/* #define TIME_TRACK */	/* Attempt to track timing statistics? */
+
+#define DIAGERR		/* Print diagnostic tape error messages */
+/* #define OBFFOUND */	/* Print OBF found during wait type messages? */
+
+/* #define EVT_CTS */	/* Turn on event routine counts */
+
+#ifdef ADVTAPF
+#define EXTSNS		/* Print extended sense information in errors */
+#define ERRSTAT		/* Print extended error statistical summaries */
+#endif
+
+#define HELICOMON	/* Watch DAC settings */
+#define DETDEF		/* Allow event parameter shorthand setup */
+
+/*-----------Default Detector Parameters-----------*/
+
+#define SPFHI 0x008
+#define SPFLO 0x080
+#define SPIWN 0x160
+#define SPXT1 0x020
+#define SPXT2 0x015
+#define SPXT3 0x010
+#define SPXTX 0x015
+#define SPNHT 0x004
+
+#define SPWAB 507
+#define SPTC  500
+ 
+#define BBFHI 0x004
+#define BBFLO 0x040
+#define BBIWN 0x200
+#define BBXT1 0x077
+#define BBXT2 0x017
+#define BBXT3 0x010
+#define BBXTX 0x030
+#define BBNHT 0x005
+
+#define BBWAB 1014
+#define BBTC  500

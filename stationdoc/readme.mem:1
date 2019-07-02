@@ -1,0 +1,165 @@
+
+
+
+
+
+
+            Directory and description of files in the 86/14 portion of
+
+            the  China  Digital  Seisic  Network.  The following files
+
+            will be found on the "China Development System" diskette.
+
+
+
+               CSBOOT.S86 - Initial boot instruction.   Built  by  the
+
+               CSBOOT.COM  command  file.   Included  in  the build in
+
+               CSPROM.COM for  the  emulogic  to  provide  the  intial
+
+               bootup.
+
+
+
+               CSBOOT.COM - Build bootup section.  Create  the  loader
+
+               file for the emulogic from the CSBOOT.S86 source file.
+
+
+
+               CSINIT.S86 - Initialization  after  boot  -  Initialize
+
+               memory and call the main program.
+
+
+
+               CSSTND.H  -  Project  standards  definition  -   Define
+
+               standard data types and constants for project.
+
+
+
+               CS3MIO.C - Standard Tape driver  for  3M  subsystems  -
+
+               Subroutine library source for 3M tape subsystems.
+
+
+
+               CS3MIO.H  -  3M  tape  drive   public   constants   and
+
+               definitions  - Standard constants and magic numbers for
+
+               the 3M iSBX 217B board.
+
+
+
+               CS3MCF.H  -  Configuration  for  this  3M  subsystem  -
+
+               Configuration  information  for  current  CDSN  machine
+
+               configuration.
+
+
+
+               CSMAIL.H - CDSN system mailbox definitions -  Locations
+
+               and   layouts   of  the  communciations  mailboxes  and
+
+               semophores.
+
+
+
+               CSMAIN.C - Mainline Collector Code - The main  decision
+
+               loop and dispatch for the task processor.
+
+
+
+               CSEVDT.C - Event detector and related subroutines - The
+
+               subroutine library for the Event detector package.
+
+
+
+               CSSEPK.H - Sensor packet definition - Definition of the
+
+               CDSN or SRO data formats.
+
+
+
+               CSCONT.H - Detector context definition - Data which  is
+
+               used  by  the  event  detector between data packages to
+
+               provide data continuity.
+
+
+
+               CSFILT.H - Filter package definition  -  Definition  of
+
+               magic   numbers,   constants,  and  the  detector  main
+
+               filters.
+
+
+
+               CSBLD.COM - Build the China System -  Build  the  china
+
+               system programs.
+
+
+                                                                          Page 2
+
+
+
+
+
+               CSLINK.COM - Link the China System  -  Link  the  china
+
+               system programs.  Prepare an emulogic loader file.
+
+
+
+               CSLINK.LST - Link object file list  -  List  of  object
+
+               files to be linked in CSLINK.COM.
+
+
+
+               CSPROM.COM - Command  file  to  prepare  CS  prom  with
+
+               emulator  - Emulogic Emulator command file to load .LDA
+
+               files and build  a  combined  .LDA  file  suitable  for
+
+               PROMming.
+
+
+
+               3MTEST.C - Program for 3M subsystem  exerciser  -  Test
+
+               program  for the 3M subsystem.  Function:  write a tape
+
+               full of test pattern and repeat.
+
+
+
+               3MTEST.LST - Link program for 3M exerciser  -  List  of
+
+               objects to link 3M excerciser in 3MTEST.COM.
+
+
+
+               3MTEST.COM - Command file to build 3M exercisor - Build
+
+               and link the exercisor.
+
+
+
+               3MPROM.COM - Command  file  to  prepare  3M  prom  with
+
+               emulator  -  Make  a  prom  loader  file  from  the  3M
+
+               exercisor.
+

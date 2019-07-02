@@ -1,0 +1,77 @@
+/*----------------------------------------------------------------------*
+ *  C h i n a   D i g i t a l   S e i s m o g r a p h   N e t w o r k	*
+ *									*
+ *	CSSTAT.H - Define structures for monitoring and storing data	*
+ *	for statistical ananlysis and performance monitoring of the	*
+ *	installed system.						*
+ *----------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------*
+ *	This software was written by Scott Halbert, of Allied Bendix	*
+ *	Field Engineering Corp for the Albuquerque Seimological 	*
+ *	Laboratory (US Geological Survey)				*
+ *----------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------*
+ *	Modification and history of CSSTAT.H				*
+ *									*
+ *-----Edit---Date----Who-------Description of changes------------------*
+ *	001 27-Feb-86 SH	Begin Creation of the file		*
+ *----------------------------------------------------------------------*/
+
+#define WEEK 7
+#define LONGWK 12
+#define TAPELEN 10
+#define MAXSERN 20
+#define TODAY (WEEK-1)
+#define WHOLEDAY 86400000L	/* Msecs in a day */
+
+#define WAITTP_TIMER	0	/* Time spent waiting for tapes */
+#define WRTTAP_TIMER	1	/* Time spent writing tapes */
+#define EVENTD_TIMER	2	/* Time spent event detecting */
+#define HOUSKP_TIMER	3	/* Time spent housekeeping */
+
+#define TIMERS 4		/* How many timers do we need */
+
+struct	daytrk {
+	INT16	daynum;		/* Number of this day */
+	INT32	starno;		/* Starting time in msecs for day */
+	INT32	endno;		/* Ending time in msecs for day */
+	INT32	timdir[TIMERS];	/* A time in msecs for each timer */
+};
+
+#ifdef STATON
+struct	dat_sum	{
+	INT32	totwrt;		/* Total record of this type seen */
+	INT32	sumday[WEEK];	/* Total of this type on this day */
+	INT32	lostrc;		/* Total number which were lost */
+	INT32	lostto[WEEK];	/* Total lost per week */
+};
+
+struct	evn_sta {
+	INT32	toteven;	/* Total events seen this type */
+	INT32	evenday[WEEK];	/* Events logged per day */
+	INT32	totalwrt;	/* Total records tape write flag was on */
+	INT32	wrtday[WEEK];	/* Total records per day */
+};
+
+struct	tape_sta {
+	TEXT	tapser[MAXSERN+1];	/* Serial number of tape */
+	struct	timestr begtim;		/* Starting time of tape */
+	struct	timestr endtim;		/* Ending time of tape */
+	INT32	recwrt;			/* Number of records written */
+	INT32	errorct;		/* Error count */
+	INT8	termtyp;		/* Termination type */
+};
+
+#define TERM_CUR 0			/* Tape is current */
+#define TERM_NOR 1			/* Normal Termination */
+#define TERM_ABO 2			/* Terminated by operator */
+#define TERM_ERR 3			/* Fatal tape error */
+#define TERM_MAX 4			/* Exceeded max bad blocks */
+
+INT32	bgrestim[LONGWK][2];		/* Background Estimate */
+INT32	daymean[24][2];			/* Mean of medians */
+INT32	median[35][2];			/* Array for calculating medians */
+#endif
+

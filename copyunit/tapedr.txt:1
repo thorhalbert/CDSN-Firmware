@@ -1,0 +1,54 @@
+		TAPE TRANSPORT READ PORTS
+
+86/14 PORTS	A0	Formatter Busy		FBY
+		A1	Ready			RDY
+		A2	Read Strobe		RSTR
+		A3	Write Strobe		WSTR
+		A4	Data Busy		DBY
+		A5	Corrected Error		CER
+		A6	Hard Error		HER
+		A7	File Mark Detected	FMK
+		B0	Read Data 0		R0
+		B1	Read Data 1		R1
+		B2	Read Data 2		R2
+		B3	Read Data 3		R3
+		B4	Read Data 4		R4
+		B5	Read Data 5		R5
+		B6	Read Data 6		R6
+		B7	Read Data 7		R7
+		C0	*HCD-75 Strobe*
+		C1	End of Tape		EOT
+		C2	Rewinding		RWD
+		C3	On Line			ONL
+		C4	File Protect		FPT
+		C5	Load Point		LPT
+		C6	Check Char Id		CCG
+		C7	NRZI/PE			NRZ
+
+		TAPE TRANSPORT WRITE PORTS
+
+iSBX 350 PORTS	A0	Initiate Command	GO
+		A1	Formatter Enable	FEN
+		A2	Transport Address 0	TAD0
+		A3	Transport Address 1	TAD1
+		A4	Formatter Address	FAD
+		A5	Density Select		DEN
+		A6	Write/Read		WRT
+		A7	Reverse/Forward		REV
+		B0	Write Data 0		W0
+		B1	Write Data 1		W1
+		B2	Write Data 2		W2
+		B3	Write Data 3		W3
+		B4	Write Data 4		W4
+		B5	Write Data 5		W5
+		B6	Write Data 6		W6
+		B7	Write Data 7		W7
+		C0	Rewind			REW
+		C1	Off Line		OFL
+		C2	Write File Mark		WFM
+		C3	Edit			EDIT
+		C4	Erase			ERASE
+		C5	Last Word		LWD
+		C6	Write Data Parity	WP
+		C7	Unused
+

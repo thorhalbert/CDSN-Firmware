@@ -1,0 +1,59 @@
+\begin{verbatim}
+.; Build CDSN package and burn proms in a DATA I/O 29 series programmer
+.;
+        .ENABLE QUIET
+        SET TT: QUIET
+        ;'<TIME>'       Clean Up Cusp Disk
+        DELETE/INFO/NOQ T:(*.O,*.S,*.TMP,*.BAK)
+        SQ T:/NOQ
+        ;
+        ;'<TIME>'       Build Source Code
+        ;
+        ;'<TIME>'               [Assemble the boot prom initializer]
+        .OPEN TEMP.TMP
+        .DATA run t:as86
+        .DATA -o DY1:csinit.o csinit.s86
+        .CLOSE
+        $@TEMP.TMP
+        .IF <EXSTAT> <> 1 .STOP
+
+        ;'<TIME>'               [Compile the event detector]
+        .OPEN TEMP.TMP
+        .DATA r c
+        .DATA -c csevdt
+        .CLOSE
+        $@TEMP.TMP
+        $@CTEMPC
+        .IF <EXSTAT> <> 1 .STOP
+
+        ;'<TIME>'               [Compile the 3M tape drivers]
+        .OPEN TEMP.TMP
+        .DATA r c
+        .DATA -c cs3mio
+        .CLOSE
+        $@TEMP.TMP
+        $@CTEMPC
+        .IF <EXSTAT> <> 1 .STOP
+
+        ;'<TIME>'               [Compile the Main Program]
+        .OPEN TEMP.TMP
+        .DATA r c
+        .DATA -c csmain
+        .CLOSE
+        $@TEMP.TMP
+        $@CTEMPC
+        .IF <EXSTAT> <> 1 .STOP
+
+        ;'<TIME>'               [Compile the Misc library]
+        .OPEN TEMP.TMP
+        .DATA r c
+        .DATA -c cs86lb
+        .CLOSE
+        $@TEMP.TMP
+        $@CTEMPC
+        .IF <EXSTAT> <> 1 .STOP
+
+.FINISH:
+        SET TT: NOQUIET
+        .EXIT
+\end{verbatim}

@@ -1,0 +1,110 @@
+/*----------------------------------------------------------------------*
+ *  C h i n a   D i g i t a l   S e i s m o g r a p h   N e t w o r k	*
+ *     iSBC 86/14 - Project Recorder Handling and Event Detection	*
+ *----------------------------------------------------------------------*
+ *	CSSTND.H - Standards and constants for project.			* 
+ *----------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------*
+ *	This software was written by Scott Halbert for the Albuquerque	*
+ *	Seismological Laboratory (US Geological Survey).		*
+ *----------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------*
+ *	Modification and history of CSSTND.H				*
+ *									*
+ *-----Edit---Date----Who-------Description of changes------------------*
+ *	001  8-Jul-85 SH	Beginning of Systems Analysis		*
+ *	002 31-Jul-85 SH	Break out sensor definitions to CSMAIL	*
+ *	003 15-Oct-85 SH	Put in BSD UNIX 2.9 Exceptions		*
+ *	004 28-Feb-86 SH	Add upward compatibilty for number out	*
+ *	005  9-Apr-86 SH	Move the time structure here		*
+ *----------------------------------------------------------------------*/
+
+#include "src:csconf.h"		/* Load configuration file */
+
+/*--------------------------Define Data types------------------------------*/
+
+#define VOID int		/* For functions which return nothing */
+#define BOOL int		/* Flag quantities */
+#define TEXT char		/* For character strings */
+
+	/*----------------------------------------------*
+	 *			8-Bit	16-Bit	32-Bit	*
+	 *	Numbers:	INT8	INT16	INT32	*
+	 *	Unsigned:	BYTE	WORD	DWORD	*
+	 *----------------------------------------------*/
+
+/*	8-Bit quantities	*/
+
+#define BYTE unsigned char	/* An 8-Bit definition */
+#define INT8 char		/* Numeric 8-bit definition */
+
+/*	16-Bit quantities	*/
+
+#ifdef vax
+#define WORD unsigned short	/* 16 bit unsigned on vaxes */
+#define INT16 short		/* 16 bit numeric quantity */
+#else
+#define WORD unsigned int	/* Assume an int is a 16 bit number */
+#define INT16 int		/* 16 bit numeric quantity */
+#endif
+
+/*	32-Bit quantities	*/
+
+#ifdef vax
+#define DWORD unsigned int	/* Definition of a 32 bit mask */
+#define INT32 int		/* A 32 bit number */
+#else
+#define DWORD unsigned long	/* 32 bit mask */
+#define INT32 long		/* 32 bit number */
+#endif
+
+/*--------BSD 2.9 Does not like unsigned anything---------------------------*/
+
+#ifdef UNIX29
+#define DWORD long		/* Unfortunately a signed 32 bit */
+#define BYTE char		/* A signed char */
+#define UNIX			/* A good assumption */
+#endif
+
+/*--------In leiu of STDIO.H, we must define some standard constants--------*/
+
+#define FOREVER for(;;)		/* Infinite loop	*/
+
+#ifndef NULL
+#define NULL	(0)		/* Impossible pointer	*/
+#endif
+#define TRUE	1		/* if (TRUE)		*/
+#define FALSE	0		/* if (!TRUE)		*/
+#define EOS	'\0'		/* End of string	*/
+
+/*----------Add a couple of routines to support old number routines---------*/
+
+#define p_lngout(dnum,base) p_number((INT32) dnum,base,0,FALSE)
+#define p_numout(dnum,base) p_number((INT32) dnum,base,0,FALSE)
+
+#ifdef TRACE
+#define RETURN(X) { _tstack--; return(X); }
+#define RETURN_VOID  { _tstack--; return; }
+#define TRACER(NAME) _namstk[_tstack++]=NAME
+#ifndef LIBSRC
+extern INT16 _tstack;
+extern TEXT *_namstk[];
+#endif
+#else
+#define RETURN(X) return(X)
+#define RETURN_VOID return
+#define TRACER(NAME)
+#endif
+
+struct r_time	{
+	INT16 day_yr;		/* days per year */
+	INT16 prv_yr;		/* days per year last year */
+	INT16 yr;
+	INT16 day;
+	INT16 hr;
+	INT16 min;
+	INT16 sec;
+	INT16 msec;
+};

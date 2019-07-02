@@ -1,0 +1,588 @@
+/*----------------------------------------------------------------------*
+ *  C h i n a   D i g i t a l   S e i s m o g r a p h   N e t w o r k	*
+ *									*
+ *	CS86LB.C - Internal programming for 86/14 processor - used	*
+ *	for I/O and device control within task processor.		*
+ *									*
+ *	All variables and subroutines starting with an underline "_"	*
+ *	are internal to the driver and are never to be used in the	*
+ *	portable sections of any other program.				*
+ *----------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------*
+ *	This software was written by Scott Halbert, and Stuart Flicker	*
+ *	of Western Programmers, Inc. of Albuquerque New Mexico,  USA 	*
+ *	for the	Albuquerque Seimological Laboratory (US Geological 	*
+ *	Survey)								*
+ *----------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------*
+ *	Modification and history of CDSN3M.C				*
+ *									*
+ *-----Edit---Date----Who-------Description of changes------------------*
+ *	001 13-Dec-85 SH	Begin coding				*
+ *	002 18-Dec-85 SH	Fix bugs in output - machine wedges	*
+ *	003  9-Jan-86 SH	Fix bug in time output code		*
+ *	004  3-Feb-86 SH	Add the p_lngout routine		*
+ *	005  4-Feb-86 SH	Add a bell to the p_warn routine	*
+ *	006 11-Feb-86 SH	Remove msecs from p_time routine	*
+ *				 Make first time request pause long	*
+ *				This version (V1.0) went to China on	*
+ *				 18-Feb-86, next edit to be V1.1	*
+ *	007 28-Feb-86 SH	Write new number output with better	*
+ *				 ranging functions, put macros in	*
+ *				 csstnd to support old calls		*
+ *	008  7-Mar-86 SH	Make a wrap type function and keep a	*
+ *				 column register			*
+ *	009 21-Mar-86 SH	Add the timer functions			*
+ *	010 25-Mar-86 SH	Add Backtrace functions			*
+ *	011 28-Mar-86 SH	Enter station ID tables			*
+ *	012  7-Apr-86 SH	Fix bug in percentage calc in run times	*
+ *	013  9-May-86 SH	The station id mailbox has changed 	*
+ *				 definition so that now it has the	*
+ *				 decade number in the lsd.  So we	*
+ *				 need to truncate this off.		*
+ *	014  5-Sep-86 SH	Version 2.0 - make a new version for 	*
+ *				 the stand along copier machine		*
+ *	015 12-Nov-86 SH	Begin the serial input routine
+ *----------------------------------------------------------------------*/
+
+char *cs86lb = "cs86lb V2.0[015]";
+
+#define LIBSRC
+#include "src:csstnd.h"		/* Setup Constants/Configuration */
+
+#ifdef TRACE
+INT16 _tstack = 0;
+TEXT *_namstk[TRACMAX] = 0;
+#endif
+
+/*----------------------------------------------------------------------*
+ *	Function: VOID lockoff() - Turn off explicit dual port ram lock	*
+ *----------------------------------------------------------------------*
+ *	Set status register to release dual port ram			*
+ *----------------------------------------------------------------------*
+ *	Returns:	VOIDs don't return anything			*
+ *----------------------------------------------------------------------*
+ *	Fatal Errors:	Nothing should fail here			*
+ *----------------------------------------------------------------------*/
+
+VOID lockoff()
+{
+
+	out(0xc9,0x03);			/* Turn on DS3 led */
+
+	return;
+}
+
+/*----------------------------------------------------------------------*
+ *	Function: VOID ledon() - Turn on DS3 LED			*
+ *----------------------------------------------------------------------*
+ *	Turn on led to indicate we are working				*
+ *----------------------------------------------------------------------*
+ *	Returns:	VOIDs don't return anything			*
+ *----------------------------------------------------------------------*
+ *	Fatal Errors:	Nothing should fail here			*
+ *----------------------------------------------------------------------*/
+
+VOID ledon()
+{
+
+	out(0xc9,0x06);			/* Turn on DS3 led */
+
+	return;
+}
+
+/*----------------------------------------------------------------------*
+ *	Function: VOID ledoff() - Turn off DS3 LED			*
+ *----------------------------------------------------------------------*
+ *	Turn off led to indicate we are pausing				*
+ *----------------------------------------------------------------------*
+ *	Returns:	VOIDs don't return anything			*
+ *----------------------------------------------------------------------*
+ *	Fatal Errors:	Nothing should fail here			*
+ *----------------------------------------------------------------------*/
+
+VOID ledoff()
+{
+
+	out(0xc9,0x0e);			/* Turn off DS3 led */
+
+	return;
+}
+/*----------------------------------------------------------------------*
+ *	Function: VOID _p_char(inchar) - Primative to print a character	*
+ *----------------------------------------------------------------------*
+ *	Primative function to output a single character to the printer	*
+ *----------------------------------------------------------------------*
+ *	Arguments:	TEXT inchar - Single character to output	*
+ *----------------------------------------------------------------------*
+ *	Returns:	VOIDs don't return anything			*
+ *----------------------------------------------------------------------*
+ *	Fatal Errors:	Nothing should fail here			*
+ *----------------------------------------------------------------------*/
+
+VOID _p_char(inchar)
+TEXT inchar;
+{
+
+	if (inchar=='\r') return;
+	serout(inchar);
+	if (inchar=='\n') serout('\r');
+
+	return;
+
+}
+
+/*----------------------------------------------------------------------*
+ *	Function: VOID p_disp(texts) - Primative to print a character	*
+ *----------------------------------------------------------------------*
+ *	Primative function to output a single character to the printer	*
+ *----------------------------------------------------------------------*
+ *	Arguments:	TEXT *texts - string terminated by \0		*
+ *----------------------------------------------------------------------*
+ *	Returns:	VOIDs don't return anything			*
+ *----------------------------------------------------------------------*
+ *	Fatal Errors:	Nothing should fail here			*
+ *----------------------------------------------------------------------*/
+
+VOID p_disp(texts)
+TEXT *texts;
+{
+	
+	INT16 strln;
+
+	for (strln=0; *(texts+strln)!='\0'; strln++);
+
+	while (*texts!='\0') _p_char(*(texts++));
+
+	return;
+
+}
+
+/*----------------------------------------------------------------------*
+ *	Function: VOID  p_number(dnum,base,min,zer) - Output number	*
+ *----------------------------------------------------------------------*
+ *	output a number via _p_char(), allows left and right 		*
+ *	justification and zero filling 					*
+ *----------------------------------------------------------------------*
+ *	Arguments:	INT32 dnum - number to be outed			*
+ *			INT16 base - base to be used while printing	*
+ *			INT16 min - column size positive is right	*
+ *					justified, negative is left	*
+ *					if number is bigger than 	*
+ *					column it gets truncated	*
+ *			BOOL zer - TRUE zero fill otherwise not		*
+ *----------------------------------------------------------------------*
+ *	Returns:	VOIDs don't return anything			*
+ *----------------------------------------------------------------------*
+ *	Fatal Errors:	Nothing should fail here			*
+ *----------------------------------------------------------------------*/
+
+VOID p_number(dnum,base,min,zer)
+INT32 dnum;
+INT16 base,min;
+BOOL zer;
+{
+
+#define MAXNUM 40
+
+	INT16 i,j,k,sign;
+	TEXT ochar;
+	TEXT disarr[MAXNUM*2];
+
+	if (zer&&min<=0) zer=FALSE;		/* only works with a min */
+	if (min>(MAXNUM-1)) min=MAXNUM-1;
+	if (min<-(MAXNUM-1)) min=(-(MAXNUM-1));
+
+	ochar=' ';
+	if (zer) ochar='0';
+	for(i=0; i<MAXNUM; i++) disarr[i]=ochar;
+	for(i=MAXNUM; i<MAXNUM*2; i++) disarr[i]=' ';
+
+	sign=1;
+	if (dnum<0) {
+		sign= -1;
+		dnum= -dnum;
+	}
+
+	i=MAXNUM;
+
+	do {
+		ochar = dnum%base;
+		dnum = dnum/base;
+	
+		if (ochar<'\012') ochar+='0';
+		else ochar+=('A'-'\012');
+	
+		disarr[--i]=ochar;
+
+	} while (dnum>0&&i>0);
+
+	if (sign== -1) {
+		if (!zer||min<=0) disarr[--i]='-';
+		else {
+			k=MAXNUM-min;
+			if (k<=i) disarr[k]='-';
+		}
+	}
+
+/*	Following cases determine justifications
+	min	Action
+	0	Print out number with no justification
+	<0	Left justify column width -min
+	>0	right justify column width min		*/
+
+	j=i;			/* Assume we start at beginning */
+	if (min>0) j=MAXNUM-min; /* Start at left column start */
+	if (min<0) j=i;		/* Start at number beginning */
+
+	k=MAXNUM-1;		/* Assume we end at number end */
+	if (min<0) k=j-min-1;	/* End at end+leftover */
+
+	for (i=j; i<=k; i++) _p_char(disarr[i]);
+
+	return;
+
+}
+
+/*----------------------------------------------------------------------*
+ *	Function: VOID p_warn(mess) - print the time and then message	*
+ *----------------------------------------------------------------------*
+ *	put a descriptive message and the time on the console 		*
+ *----------------------------------------------------------------------*
+ *	Arguments:	TEXT *mess - message to print out		*
+ *----------------------------------------------------------------------*
+ *	Returns:	VOIDs don't return anything			*
+ *----------------------------------------------------------------------*
+ *	Fatal Errors:	Nothing should fail here			*
+ *----------------------------------------------------------------------*/
+
+VOID p_warn(mess)
+TEXT *mess;
+{
+
+	_p_char('\n');
+	_p_char((TEXT) 07);		/* [005] Output an ascii bell */
+	_p_char((TEXT) 07);		/* [005] Output an ascii bell */
+
+	p_disp(mess);
+
+}
+VOID p_crlf()
+{
+
+	_p_char('\n');
+	return;
+
+}
+VOID p_cont()
+{
+	p_crlf();
+	p_disp(" ---------");
+	return;
+}
+
+/*----------------------------------------------------------------------*
+ *	Function: VOID p_fatal(sub,mess) - die and print message	*
+ *----------------------------------------------------------------------*
+ *	die and print a descriptive message on console			*
+ *----------------------------------------------------------------------*
+ *	Arguments:	TEXT *subr - subroutine machine dies in		*
+ *			TEXT *mess - message to print out		*
+ *----------------------------------------------------------------------*
+ *	Returns:	VOIDs don't return anything			*
+ *----------------------------------------------------------------------*
+ *	Fatal Errors:	Nothing should fail here			*
+ *----------------------------------------------------------------------*/
+
+VOID p_fatal(sub,mess)
+TEXT *sub,*mess;
+{
+
+	p_crlf();
+	p_crlf();
+	p_disp("***********86/14 Fatal error has occured**************");
+	p_crlf();
+	p_warn("Subroutine: [");
+	p_disp(sub);
+	p_disp("] - ");
+	p_disp(mess);
+	p_crlf();
+	p_disp("*************86/14 processor is down******************");
+	p_crlf();
+	p_crlf();
+
+	FOREVER;
+
+}
+
+
+#ifdef TRACE
+VOID _bak_trace()
+{
+
+	INT16 t;
+
+	p_disp("trace: ");
+	for (t=0; t<_tstack; t++) {
+		if (t!=0) p_disp("/");
+		p_disp(_namstk[t]);
+	}
+}
+#endif
+
+
+/*---------------Serial Interface Setup-----------------------------*/
+
+#define CLCK1 1		/* Clock x1 baud rate */
+#define CLCK16 2	/* Clock x16 baud rate */
+#define CLCK64 3	/* Clock x64 baud rate */
+
+#define SERSET 0x4c	/* 8 bits no parity 1 stop bit */
+
+#define PCI_WCTL 0xDA	/* Write control port */
+#define PCI_WDAT 0xD8	/* Write data port */
+
+#define PCI_RSTA 0xDA	/* Read status port */
+#define PCI_RDAT 0xD8	/* Read data port */
+
+#define PCI_CTXE 0x01	/* Transmit enable */
+#define PCI_CDTE 0x02	/* Enable DTE */
+#define PCI_CRXE 0x04	/* Receive enable */
+#define PCI_CBRK 0x08	/* Send break character */
+#define PCI_CERR 0x10	/* Reset error */
+#define PCI_CRTS 0x20	/* Enable RTS */
+#define PCI_CINI 0x40	/* Internal reset */
+#define PCI_CHNT 0x80	/* Enter hunt mode */
+
+#define PC_TXRDY 0x01
+#define PC_RXRDY 0x02
+#define PC_TXE   0x04
+#define PC_PE    0x08
+#define PC_OE    0x10
+#define PC_FE    0x20
+#define PC_SYND  0x40
+#define PC_DSR   0x80
+
+#define BUFMAX 80
+char serinbuf[BUFMAX+1] = 0;
+int	bufpos=0;
+
+#define SER_RING 256	/* Size of output ring buffer */
+char	ring_buffer[SER_RING] = '\0';	/* Ring buffer */
+int	ringstart=0,	/* Byte which to write next data into */
+	ringout=0,	/* Byte+1 last written out */
+	ringfirst=0;	/* First byte in next output data */
+
+BOOL	inited=FALSE;
+
+#define B75   16275
+#define B100  12288
+#define B110  11171
+#define B200  6144
+#define B300  4096
+#define B600  2048
+#define B1200 1024
+#define B2400 512
+#define B3600 341
+#define B4800 256
+#define	B9600 128
+#define B19200 64
+#define B38400 32
+#define B76800 16
+
+#define BRATE B1200	/* Set for 1200 baud
+
+#define PIT_RCTL 0xD6	/* PIT control status read register */
+#define PIT_WCTL 0xD6
+
+#define PIT_WC0  0xD0	/* PIT counter 0 write port */
+#define PIT_RC0  0xD0	/* PIT counter 0 read port */
+
+#define PIT_WC1	 0xD2
+#define PIT_RC1	 0xD2
+
+#define PIT_WC2	 0xD4
+#define PIT_RC2	 0xD4
+
+serini()
+{
+
+	int loop;
+
+/*-------------------Fire up the PIT at the desire rate-----------------*/
+
+	out(PIT_WCTL,0xBE);	/* Set up square wave generator on gen 2 */
+	out(PIT_WC2,BRATE&0xFF);	/* Output lsb of baud count */
+	out(PIT_WC2,(BRATE>>8)&0xFF);	/* Output msb of baud count */
+
+/*-------------------Set up the PCI at 1x clock rate--------------------*/
+
+	out(PCI_WCTL,0x80);	/* Reset PCI -- see 3-23 in 86/14 book */
+	out(PCI_WCTL,0x00);	/* Set PCI to known state */
+	out(PCI_WCTL,0x00);	/* Set PCI to known state */
+	out(PCI_WCTL,0x00);	/* Set PCI to known state */
+	out(PCI_WCTL,0x00);	/* Set PCI to known state */
+
+	out(PCI_WCTL,0x40);	/* Internal reset - go to mode instruction */
+	for (loop=0; loop<4000; loop++);	/* Waste time */
+
+	out(PCI_WCTL,SERSET|CLCK1);		/* Clock rate x1 */
+	for (loop=0; loop<4000; loop++);	/* Waste time */
+
+	out(PCI_WCTL,PCI_CRXE|PCI_CTXE|PCI_CDTE|PCI_CRTS);
+
+	ringstart=0;	/* Initialize ring buffer */
+	ringout=0;	
+	ringfirst=0;
+
+	inited=TRUE;
+
+}
+
+waittx()
+{
+
+	while(!(in(PCI_RSTA)&PC_TXRDY));
+
+}
+
+
+serout(sinbyt)
+char sinbyt;
+{
+
+	char tcr;
+
+	tcr=tryin();
+
+	if (tcr==19) {				/* XON/XOFF wait loop */
+		FOREVER {
+			tcr=serin();
+			if (tcr==17) break;
+		}
+	}
+
+	if (!inited) serini();
+
+	waittx();
+
+	out(PCI_WDAT,sinbyt);
+
+}
+
+waitrx()
+{
+
+	while(!(in(PCI_RSTA)&PC_RXRDY));
+
+}
+
+char serin()
+{
+
+	char ichar;
+
+	if (!inited) serini();
+
+	waitrx();
+
+	ichar=in(PCI_RDAT);
+	ichar &= 0x7F;
+
+	return(ichar);
+}
+
+char tryin()
+{
+
+	char ichar;
+
+	if (!inited) serini();
+
+	if (!(in(PCI_RSTA)&PC_RXRDY)) return(0);
+
+	ichar=in(PCI_RDAT);
+
+	return(ichar);
+}
+
+char *tgets()
+{
+
+	BOOL	deleting;
+	char ichar;
+
+	bufpos=0;
+	deleting=FALSE;
+
+	FOREVER {
+
+		ichar=serin();
+
+		if (ichar==0) continue;
+		if (ichar==10) continue;
+
+		if (ichar==19||ichar==17) continue;
+
+		if (ichar==13) {
+			serinbuf[bufpos]='\0';
+			p_disp("\n");
+			return(serinbuf);
+		}
+
+		if (ichar==8||ichar==127) {
+			if (!deleting) {
+				_p_char('/');
+				deleting=TRUE;
+			}
+
+			if (bufpos<=0) {
+				bufpos=0;
+				_p_char(7);
+				continue;
+			}
+
+			bufpos--;
+			_p_char(serinbuf[bufpos]);
+
+			continue;
+
+
+		}
+
+		if (ichar==21||ichar==24) {
+			if (deleting) {
+				_p_char('/');
+				deleting=FALSE;
+			}
+
+			p_disp(" %cancelled\n");
+			bufpos=0;
+			continue;
+		}
+
+		if (ichar<32) {
+			_p_char(7);
+			continue;
+		}
+
+		if (deleting) {
+			_p_char('/');
+			deleting=FALSE;
+		}
+
+		if (bufpos>BUFMAX) {
+			_p_char(7);
+			continue;
+		}
+
+		if (ichar>=96) ichar-=32;
+
+		serout(ichar);
+
+		serinbuf[bufpos++]=ichar;
+
+	}
+}

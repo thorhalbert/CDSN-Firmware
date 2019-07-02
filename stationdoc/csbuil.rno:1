@@ -1,0 +1,48 @@
+.AP
+.F
+.FL HYPHENATE
+.FL CAPITALIZE
+.HY
+.PR
+.J
+.PS 60,80
+.LM 12
+.RM 70
+.c;Instructions for Building the CDSN program for the 86/14
+.p 0,2,5
+There are a few command files which are provided to build the task
+processor program.  There are only a few steps involved in the build
+process.
+.p 0,1,5
+The main disk contains all of the program sources and the basic
+programming environment is marked "China System Development."  This
+disk is always in drive 0 (the left drive), and should be booted when
+the system is brought up.
+.p
+To build the system, place the disk marked "Whitesmiths Cusps"
+into the right drive (drive 1, DY1:).  Then the command file can be
+executed to actually build all pieces of the CDSN system.  This is
+done by typing "IND CDSN_<CR>" at the dot.  This will build all main pieces,
+link them together, and set up the files to be burnt onto PROMs.
+.p
+The machine will proceed unaided (unless there are programming
+errors), until it is ready to make PROMs.  At this time, the 86/14
+system uses two PROMs to hold the entire system and its data.  These
+PROMs should be 27128A-2 or equivalent.  The OTP (one time
+programmable) plastic versions of these should be used for PROMs sent
+to China as export restrictions do not allow the windowed PROMs to be
+exported.  The plastic PROMs are functionally identical to the
+windowed programs except that they cannot be erased.
+.p
+The program will ask you if the PROM programmer is ready in remote
+mode.  Make sure that the programmer is on, and hit the following keys
+on the DATA I/O programmer [SELECT] [F] [B] [ENTER] [ENTER].  Also
+make sure that the printer port is directed to the programmer.  The
+type "YES" to the prompt on the Emulogic.  The command file will then
+enter a dialog with you to guide you through the PROM process.
+.p
+When this is complete, you will be back to RT-11 (at the dot), and may
+continue on from there.  If you wish to clear off the work files made
+during the last build to give you enough room to program, type in
+"@CLEAN_<CR>" at the dot.  This will clean off the system disk and
+squeeze it.

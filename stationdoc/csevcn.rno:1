@@ -1,0 +1,62 @@
+.AP
+.F
+.FL HYPHENATE
+.FL CAPITALIZE
+.HY
+.PR
+.J
+.PS 60,80
+.LM 12
+.RM 70
+.P 0,0,5
+The following preprocessor variables affect the configuration of the event
+detector:
+.LM +10
+.P -5,1,5
+UNIX - Is the system a UNIX system?
+.P -5,0,5
+Alternative:  The system is an RT-11 Whitesmiths C system.
+.P -5,1,5
+MAINDEF - Define the main section and variables?
+.P -5,0,5
+Alternative: Do not define the main subroutine.  The event detector is
+configured to be a subroutine library to be called from the user's program.
+.P -5,1,5
+TIMESTAMP - Print the time out on STDOUT when minutes are 0?
+.P -5,0,5
+Alternative: Do not print the time out.
+.P -5,1,5
+PONSET - Print the onset information on STDOUT when event detected.
+.P -5,0,5
+Alternative: Do not print onset information out.  This information is still
+returned by e_detect.
+.P -5,1,5
+LONGOUT - Use the extended event-detector tape handler?
+.P -5,0,5
+Alternative:  Do not use the extended tape handler.
+.P -5,1,5
+SRO - Use the SRO standard data packet format?
+.P -5,0,5
+RSTN - Use the CDSN/RSTN standard data packet format?
+.P
+Default: RSTN
+.LM -5
+.P 0,1,5
+The following preprocessor variables are used during program debugging and
+are not used during production:
+.LM +5
+.P -5,1,5
+COMMENT - Never to be defined.  Used for extended comments or to
+temporarily remove code.  Code should not be left this way, and should be
+reinstated or permanently removed after debugging is completed.
+.P 
+DEBUG - Input code to print debugging information.
+.P
+LIMIT - Set to a numeric value which will determine the number of data
+packets which will be read in the main program before it terminates:
+.P -5,0,5
+Alternative: Run until the end of the first tape.
+.P -5,1,5
+YEAR1D - A macro which will yield the 10's place of the year.  Used to
+disable the 10's place if the hardware or software doesn't support 10's
+place in the year.

@@ -1,0 +1,44 @@
+\newpage
+\section{CDSN 86/14 Software Sources}
+Here is a listing of all of the code and command files used to
+create the proms for the 86/14 processor.
+\subsection{CSBOOT.S86 - Initial boot transfer code}
+\input [.listings]CSBOOT.S86 
+\subsection{CSINIT.S86 - Initialization after boot}
+\input [.listings]CSINIT.S86 
+\subsection{CSCONF.H - PROM configuration}
+\input [.listings]CSCONF.H 
+\subsection{CSSTND.H - Project standards definition}
+\input [.listings]CSSTND.H 
+\subsection{CSMAIL.H - CDSN system mailbox definitions}
+\input [.listings]CSMAIL.H 
+\subsection{CSSTAT.H - Statistical Collections}
+\input [.listings]CSSTAT.H 
+\subsection{CSMAIN.C - Mainline Collector Code}
+\input [.listings]CSMAIN.C 
+\subsection{CS3MIO.H - 3M tape drive public constants and definitions}
+\input [.listings]CS3MIO.H 
+\subsection{CS3MCF.H - Configuration for this 3M subsystem}
+\input [.listings]CS3MCF.H 
+\subsection{CS3MIO.C - Standard Tape driver for 3M subsystems}
+\input [.listings]CS3MIO.C 
+\subsection{CSFILT.H - Filter package definition}
+\input [.listings]CSFILT.H 
+\subsection{CSCONT.H - Detector context definition}
+\input [.listings]CSCONT.H 
+\subsection{CSSEPK.H - Sensor packet definition}
+\input [.listings]CSSEPK.H 
+\subsection{CSEVDT.C - Event detector and related subroutines}
+\input [.listings]CSEVDT.C 
+\subsection{CS86LB.C - 86/14 internal subroutine library}
+\input [.listings]CS86LB.C 
+\subsection{CLEAN.COM - Command file to remove all built materials}
+\input [.listings]CLEAN.COM 
+\subsection{CDSN.COM - IND command file to build system}
+\input [.listings]CDSN.COM 
+\subsection{CSCOMP.COM - IND command file to compile and assemble pieces}
+\input [.listings]CSCOMP.COM 
+\subsection{CSLINK.COM - IND command file to prepare link outputs}
+\input [.listings]CSLINK.COM 
+\subsection{CSBURN.COM - IND command file to burn proms on Data I/O 29A programmer}
+\input [.listings]CSBURN.COM 

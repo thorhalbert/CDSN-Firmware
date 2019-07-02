@@ -1,0 +1,57 @@
+
+	WIRE LIST FOR J5 CONNECTOR
+
+	J5-2	to	P1-48
+	J5-4	to	P5-28
+	J5-6	to	P5-8
+	J5-8	to	P5-48
+	J5-10	to	P5-16
+	J5-12	to	P5-14
+	J5-14	to	 n/c
+	J5-16	to	 n/c
+	J5-18	to	P5-34
+	J5-20	to	P5-24
+	J5-22	to	P5-30
+	J5-24	to	P5-2
+	J5-26	to	P5-10
+	J5-28	to	P5-4
+	J5-30	to	P5-12
+	J5-32	to	P5-6
+	J5-34	to	P5-36
+	J5-36	to	 gnd
+	J5-38	to	P5-18
+	J5-40	to	P5-26
+	J5-42	to	P5-20
+	J5-44	to	 gnd
+	J5-46	to	P5-44
+	J5-48	to	P5-12
+	J5-50	to	P1-10
+
+	WIRE LIST FOR J1 CONNECTOR
+
+	J1-1	to	 n/c
+	J1-2	to	P1-16
+	J1-3	to	P1-14
+	J1-6	to	P1-8
+	J1-8	to	P1-2
+	J1-10	to	P1-4
+	J1-12	to	P1-36
+	J1-14	to	P1-34
+	J1-16	to	P1-30
+	J1-18	to	P5-46
+	J1-20	to	P1-6
+	J1-22	to	P1-22
+	J1-24	to	P5-22
+	J1-26	to	P1-32
+	J1-28	to	P1-46
+	J1-30	to	P1-20
+	J1-32	to	P1-26
+	J1-34	to	P1-44
+	J1-36	to	P1-42
+	J1-38	to	P1-40
+	J1-40	to	P1-28
+	J1-42	to	P1-38
+	J1-44	to	P1-18
+	J1-46	to	P5-42
+	J1-48	to	P5-40
+	J1-50	to	P5-38

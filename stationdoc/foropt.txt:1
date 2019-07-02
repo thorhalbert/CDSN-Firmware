@@ -1,0 +1,85 @@
+The following generic functions may be used with Fortran, C, and Pascal
+
+	function dchan=ondete(samrate,arraysiz,FLAGS)
+		FLAGS can consist of:
+
+			ONSET - Prints the onset information out
+			PARAM - Prints the parameters when they change
+
+		Create a detector to work on generic long type data arrays.
+
+	subroutine offdet(dchan)
+
+		Remove a detector and eliminate any memory it took up.
+
+	function dchan=onpak(samrate,compon,station,element,OPTIONS,FLAGS)
+		OPTIONS can consist of:
+
+			RSTN = Rstn data format
+			SROD = Sro data format
+			WSSN = Wssn Upgrade data format
+			SRO = Sro Packet Format
+			CDSN = Cdsn data format
+
+		Create a detector to work on different data formats and
+		packet formats.  Note, leave component, element, and station
+		zero if they do not apply to your data situation.
+			Station allows multiple stations to be present
+			 in the data stream, it will pick only data 
+			 on that station to analyse.  If left zero it
+			 will ignore the station and process all stations.
+			Component allows multiple components per record 
+			 (up/down,north/south,east/west), the number 
+			 is the offset within the data record for the
+			 data.  Subroutine will determine how the data
+			 is supposed to be packed.  A zero component
+			 will pick the first component, and if there is
+			 only one, all data will be used.  If the packet
+			 says is more than one component, you will only
+			 get the first one.  If a component you want
+			 never comes along in the data, the detector 
+			 will never be run.
+			Element allows multiple seismometers per component
+		 	 to be differentiated.  A zero element will select
+			 the first element, and if there is only one, it
+			 will process all of the data.  If the packet says 
+			 there is more than one element, you will only get
+			 the first one.  If the element you want never 
+			 comes along in the data, the detector will never
+			 be run.
+
+	subroutine setdpr(dchan,various parameters...)
+		
+		Set given detector parameters.
+
+	subroutine getdpr(dchan,various parameters...)
+
+		Return detector parameters.
+
+	function bigtime=timec(year,day,hours,min,sec,msec)
+		
+		Convert time units to a combined time figure.
+
+	subroutine timebk(bigtime,year,day,hours,min,sec,msec)
+
+		Convert from combined time figure into units.
+
+	subroutine andata(dchan,array,starttime)
+
+		Analyse a generic array of data.
+
+	subroutine anpack(arraypacket,dchan1,...,dchan6)
+
+		Analyse a formatted data packet, will only use data
+		which was first specified in the onpak() routine above
+		if there are more than 6 different channels to be analysed,
+		this routine can be used more than once with different 
+		channels.  
+
+	subroutine getres(dchan,event evaluations...)
+
+		Get results of the event analysis.  This will tell
+		if the channel was run, if the tape write flag is on,
+		if there was an event, and what the event looked like.
+		This is often polled after an anpack() call to see
+		what happened.

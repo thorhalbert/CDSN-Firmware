@@ -1,0 +1,160 @@
+/*----------------------------------------------------------------------*
+ *  C h i n a   D i g i t a l   S e i s m o g r a p h   N e t w o r k	*
+ *     iSBC 86/14 - Project Recorder Handling and Event Detection	*
+ *----------------------------------------------------------------------*
+ *	CSMAIL.H - Define Inter-Processor Mailbox region		*
+ *----------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------*
+ *	This software was written by Scott Halbert for the Albuquerque	*
+ *	Seismological Laboratory (US Geological Survey).		*
+ *----------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------*
+ *	Modification and history of CSMAIL.H				*
+ *									*
+ *-----Edit---Date----Who-------Description of changes------------------*
+ *	001 29-Aug-85 SH	Do Documentation			*
+ *	002 12-Sep-85 SH	Add the event in progress flag 		*
+ *	003 12-Nov-85 SH	Fix typo in the event in progress ptr	*
+ *	004 27-Jan-86 SH	Add a device name to the event stuff	*
+ *	005  4-Feb-86 SH	Add the event first time flags		*
+ *	006  6-Feb-86 SH	Put in the lookback onset data		*
+ *	007 25-Feb-86 SH	Start statistical data and lost checks	*
+ *	008  7-Mar-86 SH	Add a column number for printing	*
+ *	009 12-Mar-86 SH	Put in temporary holding places for	*
+ *				 n_hits variables, later we will make	*
+ *				 them real mailboxes.			*
+ *	010 18-Mar-86 SH	Put detcon onto the stack, and get it	*
+ *				 off the prom, should save much space	*
+ *	011 28-Mar-86 SH	Add new write queue tables		*
+ *	012  9-Apr-86 SH	Add space for record type counts	*
+ *	013  8-May-86 SH	Make nhits variables into mailboxes	*
+ *----------------------------------------------------------------------*/
+
+/*	Mailbox definitions 	*/
+
+#define MBOFF (-0x4000)
+#define m_b_ad(mbusad) (mbusad+MBOFF)	/* Convert massbuss address->local */
+
+struct detpar {
+	WORD	d_filhi;
+	WORD	d_fillo;
+	WORD 	d_iwin;
+	WORD	d_xth1;
+	WORD	d_xth2;
+	WORD	d_xth3;
+	WORD	d_xthx;
+};
+
+struct even_dat {
+
+	BYTE	_spac1;
+	BYTE	e_polar;	/* Character containing the polarity */
+	BYTE	e_look[2];	/* [006] Return the lookback */
+	BYTE	e_snr[6];	/* SNR bytes */
+	BYTE	e_year[2];	/* Year of onset */
+	BYTE	e_days[4];	/* Day of onset (year-julian) */
+	BYTE	e_hours[2];	/* Hours of onset */
+	BYTE	e_mins[2];	/* Minutes of onset */
+	BYTE	e_secs[2];	/* Seconds of onset */
+	BYTE	e_msecs[4];	/* Millesecs of onset */
+	BYTE	e_amps[6];	/* Amplitude of onset */
+	BYTE	e_pl[2];	/* Integer part of period */
+	BYTE	e_pr[4];	/* Decimal part of period */
+	BYTE	e_large[4];	/* twosd, background noise */
+};
+
+struct evn_que {
+	struct rec_out **edptr;		/* Pointer to event pointer */
+	struct detpar *dpr_loc;		/* Pointer to detector params */
+	struct even_dat *even_loc;	/* Pointer to event data stor */
+	WORD *evd_on;			/* Pointer to event on/off flg */
+	WORD *evd_prg;			/* Event in progress flag [002] */
+	WORD *evt_fst;			/* Event first time flag [006] */
+	BYTE chaoff;			/* Offset into channel */
+	TEXT *detnam;			/* Pointer to name of the detector */
+};
+
+#define MAXWQ 4				/* Maximum number of write buffs */
+struct wrt_que {
+	WORD bufquan;			/* Number of actual buffers */
+	struct rec_out **wrtptr[MAXWQ];	/* Pointers out to buffers */
+	struct rec_out **curloc;	/* Mailbox containing current loc */
+	struct rec_out *buf_lst[MAXWQ];	/* Pointers to actual mailboxes */
+	TEXT *bufnam;			/* Record type name */
+	WORD secs;			/* Duration of buffer in seconds */
+	WORD msecs;			/* Left over msecs in above */
+	BOOL fstflg;			/* Disregard this time error? */
+	INT16 recprt;			/* Number of This type record */
+};
+
+#define OUTMAX 0xb7ff			/* Maximum write buffer size */
+#define BEGTTY 0xb000			/* Beginning of tty buffer */
+
+#define CHANQUAN 12
+#define MARGIN 75			/* Default margin */
+
+#ifdef maindef
+
+WORD *we_r_up = m_b_ad(0xb802);			/* Our processor up flag */
+WORD *curabo = m_b_ad(0xbca0);			/* Abort current tape */
+WORD *unlotd = m_b_ad(0xbca2);			/* Unload tape drive */
+TEXT **outtty = m_b_ad(0xb82c);			/* Output tty buffer */
+WORD *timreq = m_b_ad(0xb810);			/* Time request buffer */
+WORD *outlck = m_b_ad(0xb888);			/* TTYOUT interlock */
+INT8 *timbuf = m_b_ad(0xb812);			/* Time buffer */
+WORD *daccha = m_b_ad(0xb874);			/* DAC monitor */
+INT8 *statid = m_b_ad(0xb850); 			/* Station ID */
+WORD column = 0;				/* What column are we on? */
+WORD margin = MARGIN;				/* The margin register */
+INT16 *bb_n_hits = m_b_ad(0xbc8c);		/* N_hits storage */
+INT16 *sp_n_hits = m_b_ad(0xbc8e);		/* N_hits storage */
+
+#define BUFNAT(X) (X&0xF800)
+
+struct wrt_que wrt_lst[MAXWQ] = {
+	{ 4, { m_b_ad(0xbc00), m_b_ad(0xbc02), m_b_ad(0xbc04), 
+	   m_b_ad(0xbc06) }, m_b_ad(0xb820), 
+	   { 0x4000, 0x4800, 0x5000, 0x5800 }, "SP" },
+	{ 4, { m_b_ad(0xbc08), m_b_ad(0xbc0A), m_b_ad(0xbc0C),
+	   m_b_ad(0xbc0E) }, m_b_ad(0xb822), 
+	   { 0x6000, 0x6800, 0x7000, 0x7800 }, "BB" },
+	{ 2, { m_b_ad(0xbc10), m_b_ad(0xbc12) }, 
+	   m_b_ad(0xb824), 
+	   { 0x8000, 0x8800 }, "LP" },
+	{ 2, { m_b_ad(0xbc14), m_b_ad(0xbc16) }, 
+	   m_b_ad(0xb826), 
+	   { 0x9000, 0x9800 }, "VLP" }};
+
+TEXT *detnam[CHANQUAN] = { "SPZ", "SPN", "SPE", "BBZ",  "BBN",  "BBE",
+		           "LPZ", "LPN", "LPE", "VLPZ" ,"VLPN", "VLPE" };
+
+INT16 dacmon = -1;	/* What channel was the helicorder last monitoring? */
+
+#define EVQUE 2		/* Numbers and locations of the event queue */
+struct evn_que event_q[EVQUE] = {
+	{ m_b_ad(0xb830), m_b_ad(0xbc1c), m_b_ad(0xbc38), m_b_ad(0xbc18), 
+	  m_b_ad(0xb864), m_b_ad(0xb884), 0, "SP" }, 	/* SP Z channel */
+	{ m_b_ad(0xb832), m_b_ad(0xbc2a), m_b_ad(0xbc62), m_b_ad(0xbc1a), 
+	  m_b_ad(0xb866), m_b_ad(0xb886), 0, "BB" }};	/* BB [003] Z chan */
+
+CONTEXT *detcon[EVQUE] = {0};		/* Copy of detector context */
+
+BYTE *bckgnd = m_b_ad(0xbca4);		/* Copy of the background */
+	
+#else
+extern TEXT **outtty;				/* Output tty buffer */
+extern WORD *timreq;				/* Time request buffer */
+extern WORD *outlck;				/* Interlock flag */
+extern INT8 *timbuf;	 			/* Time buffer */
+extern TEXT *detnam[CHANQUAN];			/* Detector Names */
+extern WORD *daccha;				/* DAC monitor */
+extern INT16 dacmon;				/* helicorder monitoring */
+extern WORD column;				/* What column are we on? */
+extern WORD margin;				/* The margin register */
+extern INT8 *statid;				/* Station ID */
+extern INT16 *bb_n_hits;			/* N_hits storage */
+extern INT16 *sp_n_hits;			/* N_hits storage */
+
+#endif

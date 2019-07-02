@@ -1,0 +1,52 @@
+\begin{verbatim}
+.; Build CDSN package and burn proms in a DATA I/O 29 series programmer
+.;
+        .ENABLE QUIET
+        SET TT: QUIET
+        ;
+.ALLDSK:
+        .TESTFILE T:LBPDSF.86
+        .IF <FILERR> = 1 .GOTO COMRDY
+        .ASK [<TRUE>] READY Is the Whitesmith Cusp disk in DY1:
+        .IFF READY ;    Please put the Whitesmith Cusp disk in DY1:
+        ;
+        .GOTO ALLDSK
+
+.COMRDY:
+        ;       ***** CDSN Build sequence *****
+        ;
+        $@CLEAN
+        .SETN SEQNUM 0
+        .SETD SEQNUM
+        .TESTFILE DK:BUILD.SEQ
+        .IF <FILERR> = 346 .GOTO WRTFIL
+        .IF <FILERR> <> 1 .GOTO SEQBAD
+        .OPENR DK:BUILD.SEQ
+        .READ SEQSTR
+        .CLOSE
+        .SETN SEQNUM 'SEQSTR'.
+.WRTFIL:
+        .INC SEQNUM
+        SQ DK:/NOQ
+        .OPEN DK:TODAY.TMP
+        .DATA #0 #define TODAY "Built '<DATE>' Seq:'SEQNUM'"
+        .CLOSE
+        ;       Built '<DATE>' at '<TIME>' Seq 'SEQNUM'
+        @CSCOMP
+        @CSLINK
+        @CSBURN
+
+.FINISH:
+        SET TT: NOQUIET
+        .STOP
+        .EXIT
+
+.PAUSE: .OPEN TEMP.TMP
+        .CLOSE
+        .RETURN
+.SEQBAD:
+        ; Got error <FILERR> while trying to open DK:BUILD.SEQ
+        .STOP
+        .EXIT
+
+\end{verbatim}

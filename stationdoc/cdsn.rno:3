@@ -1,0 +1,406 @@
+.AP
+.F
+.FL HYPHENATE
+.FL CAPITALIZE
+.PR
+.J
+.PS 60,80
+.LM 12
+.RM 70
+.C;CDSN 86/14 Project Documentation
+.p 0,2,5
+This is a description of the programs which go together to make the system
+which runs on the Intel iSBC 86/14 task processor within the China Digital
+Seismic Network (CDSN) chassis. The program is contained within 32K bytes of
+ROM on the 86/14 board. The board also contains 64K of multibus dual-ported
+RAM which is used for local storage within the 86/14 and for the system common
+memory used for inter-processor communication via mailboxes.
+.p 0,1,5
+The task processor has the following responsibilities:
+.LM +5
+.p -3,1,5
+o##Processing seismic data from the master processor and determining if the
+data contains seismic events, and then recording the quality, intensity,
+time and other information related to the onset of the event.  This data is
+placed in a mailbox which is used to set up record header information by the
+master processor, and printed on the console by the calibrator processor.
+This data is used by the master processor to determine if tape writing should
+be turned on (when in full event detect mode).
+.p
+o##Collection of data from the master processor, and upon command, writing
+that data onto a tape cartridge.  Verify after write, and error retry is
+automatically performed to assure data integrity.  The system will
+automatically select the first available tape drive to write on, and will
+terminate a tape when it approaches full, then will switch to the next
+available tape drive.  The used tapes are unlocked and a short buzz is sounded
+to indicate the tape should be removed and replaced with an empty tape.
+.p
+o##Periodic checking of system mailboxes to keep the event detector informed
+of operator event parameter changes.  
+.p
+o##Execute commands from the console to manage the tape system, such as
+aborting the current tape, or unloading the other tape drive.
+.lm -5
+.p 0,1,5
+The project is written primarily in the C high level language. There are two
+small assembler pieces which perform bootstrapping operations. The system
+was written on an Emulogic PDP-11/23 workstation running the RT-11
+operating system. The Emulogic system contains an in-circuit 8086 emulator,
+and the system software includes a Whitesmiths C compiler which produces
+object code for the 8086.
+.p
+The software is structured and modularized. All configuration information,
+constants and magic numbers are contained in program header files which are
+included in the source at compile time.
+.p 0,2,5
+The software system for the task processor is divided into 3 operational
+divisions:
+.lm +5
+.p -3,1,5
+o##The Main Section - this is the mainline code for the task processor, all
+decisions are made and work is directed from here.
+.p
+o##The 3M tape drivers - this section contains all the code required to put
+information onto the 3M tape subsystem and perform integrity verification.
+The system is intended to provide a generic interface which could be
+replaced with other I/O systems as desired.
+.p
+o##The Event Detector - this section is responsible for analysing seismic
+data packets and determining event onset information. The detector is
+highly tunable, and is part of a generic event detector package from the
+Albuquerque Seismic Laboratory.
+.lm -5
+.p 0,2,5
+Each section will be discussed separately with extra sections for
+information about building and configuration, and placing the program onto
+PROM.
+.pg
+.c;The Main Program Section
+.p 0,2,5
+This section describes the parts of the main section and how they manage
+the rest of the system.  The primary pieces of the main section are:
+.lm +5
+.p -3,1,5
+o##The Bootstrap
+.p
+o##The Mailboxes
+.p
+o##The Task Loop
+.lm -5
+.p 0,2,5
+^&The Bootstrap Program\&
+.p 0,1,5
+The 86/14 jumps to the address of 0xFFFF0 when it is turned on or a reset is
+performed. (The 0x notation which proceeds a number indicates that it is
+hexadecimal.) The code segment register contains 0xFFFF, and the PC is 0.
+There are 16 bytes of memory in which to place the bootup routine. In the
+china system, our 32K of ROM is present in exactly the last 32K of the 22 bit
+physical memory from (0xF8000 through 0xFFFFF), so that the last 16 bytes of
+the ROM correspond to where the bootstrap needs to be.
+.p
+The initial boot is accomplished by CSBOOT.S86 which is a very small
+assembler program which performs a far jump (intersegment jump) to the
+address 0xF8000. The code segment register is set to 0xF800 and the PC is
+set to 0. 0xF8000 is the beginning of our PROM and is also the beginning of
+the main program. 
+.p
+The CSINIT.S86 assembler routine is loaded and starts at 0xF8000.  It
+performs some setup functions before calling the C program.  
+.lm +5
+.p -3,1,5
+o##Dual port RAM lockout is turned on to keep the other processors from
+setting up race conditions while the memory is being set up.
+.p
+o##Set the data segment register to 0x0000 so that the mailboxes are within
+the scope of normal data adressing.
+.p
+o##Set the stack segment to 0x0000.
+.p
+o##Clear memory from 0x00000 through 0x0FFFF.  This clears the mailbox area
+(from 0x00000 through 0x07FFF) and our own data area (from 0x08000 through
+0x0FFFF).
+.p
+o##Set the stack to start at the end of the data section to extend to the end
+of available RAM.  The data itself is setup in the next step.
+.p
+o##Copy the initialization information from ROM starting at 0xFC000 to 
+RAM starting at 0x8000.  The
+initialized variables are stored by the compiler, and will now be copied to
+real RAM so that they may be used.  The compiler stores the length of the
+data section so that only actual data is moved.
+.p
+o##The dual port RAM lockout is turned off so that the other processors can
+access the 86/14 on-board dual port RAM.
+.p
+o##Call the main program (the c routine called main()).  If the main program
+ever returns or calls the exit() routine, the program automatically reboots.
+.lm -5
+.p 0,2,7
+^&The System Mailboxes\&
+.p 0,1,5
+Communication between the 3 processors within the CDSN system is done via
+shared memory which is on the 86/14 task processor board.  The addresses for
+this memory on the 86/14 is from 0x00000 through 0x07FFF.  On the massbus,
+the address of this memory is 0x04000 through 0x0BFFF.  Data are placed in
+common memory which is polled by the various processors.
+.p
+The header file CSMAIL.H contains all of the definitions for the mailboxes
+which the task processor will need.  This file also contains the
+information about the configuration of the seismic data channels and where
+their mailboxes are.  All addresses in this file are expressed as the
+massbuss address to be consistant with other documentation.  There is a
+conversion macro to derive the actual 86/14 local address.
+.p 0,2,7
+^&The Main Loop\&
+.p 0,1,5
+The main loop polls the mailboxes for commands and information which
+contain details about what tasks it is being commanded to do by the master
+processor. The main loop is in the program CSMAIN.C and is called from the
+CSINIT bootstrap.
+.p
+The main program first attempts to initialize the tape subsystem.  If that
+is unsuccessful, it reboots the machine.  If it is successful, 
+0xFF is written into the task processor up mailbox.
+.p
+The main program then goes into an infinite loop which it will never exit.
+There are two main duties which it does each time through the loop.  It
+does them in the order of their importance.
+.p
+The first duty is to check to see if there are any seismic data records
+which can be written to tape. This is done by the wrtbuf() routine. 
+wrtbuf() scans through each data type sequentially (SP, then BB, then LP, then
+VLP).  It determines where the processor is writing now (since this data
+buffer can never be written).  It scans and assures that that address does not
+appear.  It then starts at that position and rolls through the rest of the
+available buffers.  It behaves in this fashion to assure that if the system
+has gotten behind (due to waiting for the tape subsystem), that it will not
+write out bad data or write the records out of order.  When a record has been
+written out to tape, the pointer in the write queue is set to zero to indicate
+that it has been written, and to keep it from writing it again.  It then moves
+on the next buffer until there is no more work left to be done.
+.p
+The next scan to be done is to see if there are any data which should 
+be analysed by the event detector.
+This is done by the evensc() routine. The program scans the event
+queue for addresses which indicate that a data packet is ready for analysis.
+When it finds one, it passes that, along with other parameters to the event
+detector. The event detector returns two pieces of information. It returns
+TRUE if that record should be written to tape. It returns FALSE if it should
+not. It also returns information about possible onsets in the onset data
+buffer. If there was an onset, the event in progress flag is set to 0, and the
+onset information is moved into the event information mailbox. After all this,
+if the routine returned TRUE, the event declared flag is turned on, if it is
+FALSE, it will be turned off. There will never be an onset when the record
+flag is not also on. The event in progress flag is used to start a new event
+when the old one was not completed. This causes the new onset to be written
+into the header of the new record before it is written out. When this
+operation is done, the address pointer is set back to zero. The processor 
+loops until all writing and event analysis is done, it then goes to 
+idle processing.  If there were more than one onset in one record (the way the
+system is currently timed, this is unlikely), the onset recorded would be that
+of the last one detected in the record.
+.p
+After the processor has idled IDLE__Q times or the main loop has
+executed ACTI__Q times the housekeeping subroutine will run (housekeep()).
+Its primary duty is to check for changes in the detector paramters. When
+they change the program modifies the context buffers for the given event
+detector, and cause it to do an auto reset. This will cause a false alarm
+event to be declared so that no data is lost when the event detector
+becomes unsynchronized. ACTI__Q is in place in case there is never any idle
+time, but due to the current specs of the CDSN project, the task processor
+is expected to spend from 20-40% of the time.
+.pg
+.c;The 3M tape subsystem subroutine library
+.p 0,2,5
+The 3M tape library provides a standard I/O library to the CDSN system.  It
+provides software drivers to talk to the HCD-75 cassette drive attached to
+an iSBC board with the iSBX 217B interface.  The drivers could run on any
+intel board which uses the iSBX 217B with minor changes to the
+configuration file, and may use 1 or 2 iSBX 217B boards each with from 1 to
+4 drives.  The CDSN specs will use one iSBX 217B board on the task
+processor (the iSBC 86/14) with 2 tape drive units.  
+.p 0,1,5
+^&The Configuration file CS3MCF.H\&
+.p 0,1,5
+The configuration file for the 3M tape subsystem contains the I/O ports'
+location, what drives are attached to the system, and what processor is
+being used. It also gives information about the parallel handshake bits for
+each iSBX board.  CDSN is configured for one iSBX 217B to be plugged into
+the J4 iSBX port on the iSBC 86/14 processor with 2 drives units 0 and 1. 
+.p 0,1,5
+^&The 3M constant file CS3MIO.H\&
+.p 0,1,5
+The constant file contains all of the constants and magic numbers used by
+the 217B and the HCD-75 components which do not change from one
+configuration or CPU to another.  It contains information about tape size,
+sense register bits, and the command lists.  It also contains the
+definitions of the public error and status registers (pseudo registers),
+which provide a generic interface to the tape drivers. 
+.p 0,1,5
+^&The 3M driver and subroutines CS3MIO.C\&
+.p 0,1,5
+CS3MIO.C contain all of the subroutines required to use the tape drives. There
+are several public subroutines and there are several subroutines which are
+used internally to implement the drivers and have names beginning with an
+underline. 
+.p
+It is intended that the public subroutines be implemented in such a way that 
+the system using them is unaware of any aspect of the operation of the I/O
+subsystem besides what is presented in the subroutines and the error and
+status registers.  This would allow any number of different I/O drivers to
+be used interchangably with these.
+.p
+Here is a list of the subroutines with a short description of what they do.
+.LM +5
+.SK 1
+.tp 10
+.c;Public 3M driver Subroutines
+.p 0,1,5
+^&VOID clos__tap(drive)\& - close up the channel which the tape drive was
+on and release the tape drive. On the HCD-75 this performs an unlock
+operation to allow the operator to remove the tape.
+.p
+^&VOID init__tape()\& - Bring the tape subsystem on line. This sends a
+reset to the controller and an init to each drive which is configured in.
+If there are any errors getting the controller to respond, the system will
+be rebooted.  The system will sit in an infinite reboot loop if the tape 
+subsystem never comes alive.  In the CDSN, the task processor will never 
+set the processor up flag for itself.
+.p
+^&VOID tap__mark(tapiov)\& - Write a tape mark at the current position.
+Move the current position forward one. Used by the CDSN system to mark the
+end of the tapes.
+.p
+^&VOID tap__rewind(tapiov)\& - Rewind the tape. On the HCD-75, sets the
+current position to 3M tape block 0x0000. The tape is not moved now, but
+will be moved the next time actual I/O occurs.
+.p
+^&TAPE tape__open(drive)\& - Open the given drive and return a pointer to
+its input output vector (IOV). A NULL is returned on an error condition. If
+an error is fatal enough to make the open fail, an unlock command is sent
+to the drive.
+.p
+^&VOID wrt__blk(tapiov,bufad,len)\& - Takes a large buffer and writes out
+as many 3m blocks as necessary to tape. In this case wrt__blk
+will be writing 2048 block records in CDSN data format, and it will write 2
+1024 byte 3M blocks. Note that error retry is done on each block by the
+routine __out__buf. 
+.sk 1 
+.tp 5 
+.c;The internal use only subroutines
+.p
+^&VOID __adv__tape(tapiov)\& - Move the tape forward logically one
+position. Does not cause any tape movement, but increments the next
+position registers. Automatically advances to the next head if necessary.
+.p
+^&VOID __getsts(tapiov)\& - Do I/O and retrieve the 3M sense status bytes
+from the drive. The public error routine is called when done to interpret
+them.
+.p
+^&VOID __out__buf(tapiov,bufad)\& - Output one 3M buffer to tape. After
+each write, a verify is done. If any errors occur, the process will be
+repeated up to RETRY__Q times. If the error persists, a dummy buffer will
+be filled with 0xFF bytes and written out, the tape postion is advanced,
+and the write is attempted again. This will continue until end of tape is
+reached or another error occurs. The tape position is moved forward 1
+place.
+.p
+^&VOID __puberr(tapiov)\& - Set the public status registers to the status
+and errors which occured in the last I/O. These are derived from the sense
+status bytes retrieved from the drive. Other error and status states are
+synthesized from tape position data.
+.p
+^&VOID __tapact(tapiov,command)\& - Execute a simple 3M subsystem command.
+__getsts is run on success or error.
+.p
+^&VOID __errtap()\& - Report sense bits on the console in case of error.
+This subroutine is currently unimplemented.
+.p
+^&VOID __wrtbuf(tapiov,buffer)\& - Perform the I/O ritual to actually write
+a buffer out to tape. __getsys() is run on success or error.
+.p
+^&VOID __verify(tapiov)\& - Verify one 3M tape block at the current
+position. The HCD-75 will compare the data in the block against the CRC
+data it stored when the data was first written. __getsts() is run to check
+the result of the verify operation. 
+.lm -5
+.pg
+.c;Event Detector Section
+.p 0,2,5
+The event detector analyses data in standard format to see if it contains
+seismic events [Please see USGS Open File Report 83-785 for discussion].
+Some data is stored and accumlated in a context record which is kept for
+each event detector.
+.p 0,1,5
+Here is a discussion of the parts of the event detector
+and a brief description of what they do:
+.lm +5
+.p 0,1,5
+^&BOOL e__detect(input,context,offset,onsetb)\& - This is the main-line part
+of the event detector and is the only interface to user programs. The program
+will provide it a pointer to the input buffer, the context buffer, which
+must be allocated and provided to the event detector for each logical detector
+channel which is to be analysed. The detector must also be sent a pointer to a
+buffer which will get onset information if an onset occurs during this record.
+The event detector will return TRUE if this data is part of the event.
+.p
+^&VOID pass__one(con__ptr,input,offset)\& - pass__one is called from
+e__detect if this is the first run, or if detector parameters
+have been changed that invalidate the current context data. 
+.p
+^&VOID det__par(con__ptr)\& - display new detector params - 
+Called by pass__one after setting up all new parameters.
+Displays current detector parameters on the console.
+.p
+^&VOID indat(input,con__ptr)\& - Loads seismic buffers into internal format
+for analysis.  
+.p
+^&BOOL p__one(con__ptr)\& - The primary function of p__one is to detect the
+peaks and troughs of the input time series. Also, the rectified P-T values
+are compared to a threshold for noise: thx (typically 1.5625xs'). Values
+less than thx are counted, and the maximum of 20 such sucessive values are
+fed into p__two.
+.p
+^&VOID p__two(maxamp,con__ptr)\& - p__two estimates the statistical
+dispersion of the background noise and calculates the four thresholds that
+are used in the detector. The dispersion is estimated by averaging the last
+16 rectified maximums received from p__one. The average value thus obtained
+is s'. For zero-mean normally distributed P-T values, s' is an estimate of
+twice the sample standard deviation of the P-T values.
+.p
+^&INT32 xth(xthi,con__ptr)\& - Calculate threshold from encoded factors
+xthi Adapted from an algorithm by R.R. Reynolds and C.R. Hutt.
+.p
+^&VOID period(con__ptr,p__kont)\& - Calculate period of the wave at onset.
+Extrapolate the time of the event sample. Calculates an integer seconds
+figure and a mantissa portion which is the milliseconds after the second.
+.p
+^&INT16 time__f(con__ptr,t__kont,tc)\& - Find time of
+onset. Interpolate time of onset similar to how period is calculated.
+.p
+^&VOID dum__out(con__ptr)\& - Determine the state of the tape write on/off
+flags. This determines how long the post data is to be recorded after the
+actual event is finished. It also determines how long to disable the
+detector after the event to remove spurious detections. As implemented
+here, the detector is disabled for 2 X wait_blk samples and then reenabled.
+Thresholds are computed anew while data are being written to the output
+during the next 2 X wait_blk samples.
+.p
+^&BOOL event(con__ptr)\& - Detects events using thresholds th1 and th2. 
+For N__HITS _= 4 an event will be detected if 4 values are greater than th2, or
+if 3 values are greater than th2, and one (or more) of the 3 are greater
+than th1 (see O-F report 83-785). 
+.p
+^&VOID wbuff(con__ptr)\& - Writes values to buffers when an event might be
+in progress.
+.p
+^&VOID ibingo(con__ptr)\& - Sets parameters when an event has been
+detected.
+.p
+^&VOID onsetq(con__ptr)\& - Estimates parameters of signal onset, calls
+onset().
+.p
+^&VOID onset(con__ptr,ibak,sper,p1,tc,fp,pt0,pt1,pt2, pt3,pt4)\& -
+Calculates period, amplitude,SNR series (O-F 83-785), and converts sample
+number to time. Outputs the estimates. 
+.p

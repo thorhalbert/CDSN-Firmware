@@ -1,0 +1,93 @@
+/	CSINIT - Initial starting code Piece Bootup 
+/	boot prom performs a far jump to this location
+
+/	Here is a quick map of the data sections on the 86/14
+/	
+/	Dual Port	00000-07FFF 32K	System mailboxes (Dual Port Ram)
+/	86/14 RAM	08000-0FFFF 32K	86/14 Data and stack
+/
+/	U57,U39		F0000-F7FFF 32K	Currently Unused Prom Area
+/
+/	U58 LO		F8000-FDBFF 23K	Program Code Area
+/	U40 HI ROM	FDC00-FFFDF 9K	Data Pre-Initialization Area
+/			FFFF0-FFFFF  -	Bootstrap Area
+/
+
+	.public START
+	.public _exit
+
+	.extern _main
+	.extern t_e		/ End of .text area +1
+	.extern d_s		/ Length of .data area
+
+	.text
+START:
+_exit:				/ go into a infinite loop upon exit
+	cli			/ Disable hardware INTR type interrupts
+
+	mov.b	al,0x00		/ Clear GATE 0 counters
+	out	0xc9,al
+	mov.b	al,0x01		/ Clear GATE 1 counters
+	out	0xc9,al
+	mov.b	al,0x02		/ Clear NMI operation
+	out	0xc9,al
+	mov.b	al,0x0b		/ TURN ON OVERRIDE/ TO DUAL PORT RAM
+	out	0xc9,al
+	mov.b	al,0x06		/ Turn on DS3 LED
+	out	0xc9,al		
+
+	mov.b	al,0x10		/ Clear GATE counters
+				/ Disable NMI
+				/ ACTIVATE OVERRIDE/ ON DUAL PORT RAM
+				/ Turn on DS3 LED
+				/ Clear megabyte address select
+	out	0xc9,al
+
+	mov.w	ax,0x0000	/ Beginning of real RAM
+	mov.w	ds,ax		/ initialize ds = 0x0000 (start of memory)
+	mov.w	ss,ax		/ initialize ss = ds (stack start there too)
+
+	mov.w	si,0		/ This is the start of RAM
+	mov.w	cx,0xFFFF	/ This is the end of RAM
+	mov.w	ax,0		/ Set memory to zero
+bloop:
+	mov.b	[si],ah		/ Set that byte to zero
+	inc.w	si		/ Get next byte
+
+	loopnz	bloop		/ Loop until cx=0
+
+/ Mod 14-May-86 to fill data mailboxes with FF to assure that we don't
+/ ever write blank records to tape
+
+	mov.w	si,0		/ This is the start of RAM
+	mov.w	cx,0x5FFF	/ This is the end the data mailboxes
+	mov.w	ax,0xFFFF	/ Set memory to ones
+oneem:
+	mov.b	[si],ah		/ Set that byte to ones
+	inc.w	si		/ Get next byte
+
+	loopnz	oneem		/ Loop until cx=0
+
+	mov.w	ax,0XFFF0	/ Start at the end of memory
+	mov.w	sp,ax		/ initialize sp
+
+	mov.w	si,0x5C00	/ This is the start of the data in ROM 0FDC00
+	mov.w	di,0x8000	/ This is where it goes in RAM
+	mov.w	cx,&d_s		/ This is the number of bytes long it is
+movin:
+
+	.cseg
+	mov.b	ah,[si]		/ Get a byte from cs+si in ROM
+	mov.b	[di],ah		/ Put into ds_di in RAM
+	inc.w 	si		/ Get next ROM
+	inc.w	di		/ Get next RAM
+
+	loopnz	movin		/ Loop via cx until all transfered
+
+	mov.w	ax,0x0000
+	mov.w	es,ax		/ Set up es so we can see mailboxes there
+
+	call	_main		/ invoke the main program section
+	jmp 	_exit		/ Reboot
+
+	.even

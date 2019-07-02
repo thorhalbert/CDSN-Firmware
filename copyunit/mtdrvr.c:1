@@ -1,0 +1,260 @@
+#include "SRC:CSSTND.H"
+#include "SRC:MTDEFS.H"
+#include "SRC:MTSTAT.H"
+
+/*
+ *	MTattach()
+ *
+ *	Initialize all of the parallel ports and query the tape subsystem
+ *	to see what drives are available and online.
+ *
+ */
+
+WORD	MTAstat=0,MTCstat=0;
+WORD	MTAflags=0,MTCflags=0;
+
+struct __MTdrv {
+	WORD 	status;
+} _MTstreg[8] = {0};
+
+int MTattach()
+{
+
+	WORD	drive,a;
+
+	SETR(0x9b); 	/* Set all ports mode 0 input */
+	SETW(0x80); 	/* Set all ports mode 0 output */
+
+	while (GETRA()&R_A_DBY) {
+		for (a=0; a<4000; a++);
+	}
+
+	for (drive=0; drive<8; drive++) {
+
+		_MTstreg[drive].status=0;
+
+		MTAstat=MTCstat=0;
+		MTAstat=W_A_FEN;
+
+		if (drive&4) MTAstat |= W_A_FAD;
+		if (drive&1) MTAstat |= W_A_TAD1;
+		if (drive&2) MTAstat |= W_A_TAD0;  /* Stupid eh? */
+	
+		PUTWA(MTAstat);	
+		PUTWC(MTCstat);
+	
+		MTAflags=GETRA()&0xFF;
+		MTCflags=GETRC()&0xFF;
+	
+	}
+}
+
+VOID MTopen(drive)
+{
+
+	WORD a;
+
+	while (GETRA()&R_A_DBY) {
+		for (a=0; a<4000; a++);
+	}
+
+	drive&=7;
+
+	MTAstat=MTCstat=0;
+	MTAstat=W_A_FEN;
+
+	if (drive&4) MTAstat |= W_A_FAD;
+	if (drive&1) MTAstat |= W_A_TAD1;
+	if (drive&2) MTAstat |= W_A_TAD0;  /* Stupid eh? */
+	
+	PUTWA(MTAstat);	
+	PUTWC(MTCstat);
+	
+	MTAflags=GETRA()&0xFF;
+	MTCflags=GETRC()&0xFF;
+	
+	_MTstreg[drive].status=0;
+	if (!(MTCflags&R_C_ONL)) return(MTE_DNS);
+
+	_MTstreg[drive].status=MTS_OPN;
+	if (MTCflags&R_C_FPT) _MTstreg[drive].status |= MTS_FPT;
+	if (MTCflags&R_C_LDP) _MTstreg[drive].status |= MTS_BOT;
+	if (MTCflags&R_C_EOT) _MTstreg[drive].status |= MTS_EOT;
+
+	return(MTE_OK);
+
+}
+
+int MTrewind(drive)
+{
+
+	int a;
+
+	while (GETRA()&R_A_DBY) {
+		for (a=0; a<4000; a++);
+	}
+
+	drive&=7;
+
+	if (!(_MTstreg[drive].status&MTS_OPN)) return(MTE_OPN);
+
+	MTAstat=MTCstat=0;
+	MTAstat=W_A_FEN;
+
+	if (drive&4) MTAstat |= W_A_FAD;
+	if (drive&1) MTAstat |= W_A_TAD1;
+	if (drive&2) MTAstat |= W_A_TAD0;  /* Stupid eh? */
+	
+	PUTWA(MTAstat);	
+	PUTWC(MTCstat);
+	
+	MTAflags=GETRA()&0xFF;
+	MTCflags=GETRC()&0xFF;
+	
+	if (!(MTCflags&R_C_ONL)) return(MTE_DNS);
+
+	PUTWC(MTCstat|W_C_REW);		/* Send it the rewind command */
+	PUTWC(MTCstat);
+
+	while (GETRC()&R_C_RWD) {
+		for (a=0; a<4000; a++);
+	}
+
+	return(MTE_OK);	
+
+}
+
+
+/*
+	MTread()
+	MTstatus()
+	MTsetup()
+	MTclose()
+
+*/
+
+int MTstatus(drive)
+{
+
+	WORD a;
+
+	while (GETRA()&R_A_DBY) {
+		for (a=0; a<4000; a++);
+	}
+
+	drive&=7;
+
+	MTAstat=MTCstat=0;
+	MTAstat=W_A_FEN;
+
+	if (drive&4) MTAstat |= W_A_FAD;
+	if (drive&1) MTAstat |= W_A_TAD1;
+	if (drive&2) MTAstat |= W_A_TAD0;  /* Stupid eh? */
+	
+	PUTWA(MTAstat);	
+	PUTWC(MTCstat);
+	
+	MTAflags=GETRA()&0xFF;
+	MTCflags=GETRC()&0xFF;
+	
+	_MTstreg[drive].status&=~(MTS_EOT|MTS_BOT|MTS_FPT|MTS_OFL);
+
+	if (!(MTCflags&R_C_ONL)) {
+		_MTstreg[drive].status|=MTS_OFL;
+		return(_MTstreg[drive].status);
+	}
+
+	if (MTCflags&R_C_FPT) _MTstreg[drive].status |= MTS_FPT;
+	if (MTCflags&R_C_LDP) _MTstreg[drive].status |= MTS_BOT;
+	if (MTCflags&R_C_EOT) _MTstreg[drive].status |= MTS_EOT;
+
+	return(_MTstreg[drive].status);
+
+}
+
+MTflap(drive)
+{
+
+	int a;
+
+	while (GETRA()&R_A_DBY) {
+		for (a=0; a<4000; a++);
+	}
+
+	drive&=7;
+
+	if (!(_MTstreg[drive].status&MTS_OPN)) return(MTE_OPN);
+
+	MTAstat=MTCstat=0;
+	MTAstat=W_A_FEN;
+
+	if (drive&4) MTAstat |= W_A_FAD;
+	if (drive&1) MTAstat |= W_A_TAD1;
+	if (drive&2) MTAstat |= W_A_TAD0;  /* Stupid eh? */
+	
+	PUTWA(MTAstat);	
+	PUTWC(MTCstat);
+	
+	MTAflags=GETRA()&0xFF;
+	MTCflags=GETRC()&0xFF;
+	
+	if (!(MTCflags&R_C_ONL)) return(MTE_DNS);
+
+	PUTWC(MTCstat|W_C_REW);		/* Send it the rewind command */
+	PUTWC(MTCstat);
+
+	PUTWC(MTCstat|W_C_OFL);		/* Send it the off-line command */
+	PUTWC(MTCstat);
+
+	return(MTE_OK);	
+
+}
+
+MTmark(drive)
+WORD drive;
+{
+
+	WORD a;
+
+	while (GETRA()&R_A_DBY) {
+		for (a=0; a<4000; a++);
+	}
+
+	drive&=7;
+
+	if (!(_MTstreg[drive].status&MTS_OPN)) return(MTE_OPN);
+
+	MTAstat=MTCstat=0;
+	MTAstat=W_A_FEN;
+
+	if (drive&4) MTAstat |= W_A_FAD;
+	if (drive&1) MTAstat |= W_A_TAD1;
+	if (drive&2) MTAstat |= W_A_TAD0;  /* Stupid eh? */
+	
+	PUTWA(MTAstat);	
+	PUTWC(MTCstat);
+	
+	MTAflags=GETRA();
+	MTCflags=GETRC();
+	
+	if (!(MTCflags&R_C_ONL)) return(MTE_DNS);
+	if (MTCflags&R_C_FPT) return(MTE_WPT);
+
+	PUTWA(MTAstat|W_A_WRT);
+	PUTWC(MTCstat|W_C_WFM);
+	PUTWA(MTAstat|W_A_WRT|W_A_GO);
+
+	for (a=0; a<4000; a++);
+	PUTWA(MTAstat|W_A_WRT);
+	for (a=0; a<1000; a++);		/* Pulse must be .5 microsec before
+					   and after, so we overcompensate */
+	PUTWA(MTAstat);
+	PUTWC(MTCstat);
+
+	while (!(GETRA()&R_A_DBY));
+
+	while (GETRA()&R_A_DBY);
+
+	return(MTE_OK);
+
+}	

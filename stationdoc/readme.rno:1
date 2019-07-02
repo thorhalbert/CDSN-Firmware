@@ -1,0 +1,80 @@
+.AP
+.F
+.FL HYPHENATE
+.FL CAPITALIZE
+.HY
+.PR
+.J
+.PS 60,80
+.LM 12
+.RM 70
+.P 0,0,5
+Directory and description of files in the 86/14 portion of the China
+Digital Seisic Network.  The following files will be found on the "China
+Development System" diskette.
+.LM +3
+.P 0,1,5
+CSBOOT.S86 - Initial boot instruction.  Built by the CSBOOT.COM command
+file.  Included in the build in CSPROM.COM for the emulogic to provide the
+intial bootup.
+.P
+CSBOOT.COM - Build bootup section. Create the loader file for the emulogic
+from the CSBOOT.S86 source file.
+.P
+CSINIT.S86 - Initialization after boot - Initialize memory and call the
+main program.
+.P
+CSSTND.H - Project standards definition - Define standard data types and
+constants for project.
+.P
+CS3MIO.C - Standard Tape driver for 3M subsystems - Subroutine library
+source for 3M tape subsystems.
+.p
+CS3MIO.H - 3M tape drive public constants and definitions - Standard
+constants and magic numbers for the 3M iSBX 217B board.
+.P
+CS3MCF.H - Configuration for this 3M subsystem - Configuration information
+for current CDSN machine configuration.
+.P
+CSMAIL.H - CDSN system mailbox definitions - Locations and layouts of the
+communciations mailboxes and semophores.
+.P
+CSMAIN.C - Mainline Collector Code - The main decision loop and dispatch
+for the task processor.
+.P
+CSEVDT.C - Event detector and related subroutines - The subroutine library
+for the Event detector package.
+.p
+CSSEPK.H - Sensor packet definition - Definition of the CDSN or SRO data
+formats.
+.P
+CSCONT.H - Detector context definition - Data which is used by the event
+detector between data packages to provide data continuity.
+.p
+CSFILT.H - Filter package definition - Definition of magic numbers,
+constants, and the detector main filters.
+.p
+CSBLD.COM - Build the China System - Build the china system programs.
+.p
+CSLINK.COM - Link the China System - Link the china system programs.
+Prepare an emulogic loader file.
+.p
+CSLINK.LST - Link object file list - List of object files to be linked in
+CSLINK.COM.
+.P
+CSPROM.COM - Command file to prepare CS prom with emulator - Emulogic
+Emulator command file to load .LDA files and build a combined .LDA file
+suitable for PROMming.
+.P 
+3MTEST.C - Program for 3M subsystem exerciser - Test program for the 3M
+subsystem.  Function: write a tape full of test pattern and repeat.
+.P
+3MTEST.LST - Link program for 3M exerciser - List of objects to link 3M
+excerciser in 3MTEST.COM.
+.P
+3MTEST.COM - Command file to build 3M exercisor - Build and link the
+exercisor.
+.P
+3MPROM.COM - Command file to prepare 3M prom with emulator - Make a prom
+loader file from the 3M exercisor.
+.P

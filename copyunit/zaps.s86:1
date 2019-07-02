@@ -1,0 +1,97 @@
+	.public	_zapout
+	.public _zapin
+
+	.extern __repsts
+
+	.text
+
+/*************************************************************************
+
+_zapout:
+	call	c_sav
+
+	mov	si,.w [bp][6]	/ si get buffer pointer
+	sub	di,di		/ di is loop and is set to 0
+	mov	cx,.w [bp][8]	/ cx is the limit
+	mov	dx,1		/ We use 1 to compare with a lot
+
+Lloop: 
+	cmp	di,cx		/ is di < bytes
+	jae	Lexit		/ l3 is exit if loop overflows
+	
+LPPIloop: 
+	in	al,0xCC		/ Get status from PPI
+
+	test	al,dl		/ Check for PPI flag set
+	je	LOBFcheck	/ check for obf set
+
+	mov	bx,si		/ Get the address contained in si (buffer)
+	inc	si		/ Increment it for next time
+	mov	al,.b [bx]	/ put target byte (indirection) into low a
+	
+	out	0x90,al		/ Out to io port
+
+	inc	di		/ increment loop
+	jmp.s 	Lloop		/ start loop over
+
+LOBFcheck:
+	in 	al,0x82		/ Read in from upi
+
+	test	al,dl		/ Test for UP_OBF flag
+	je	LPPIloop	/ Go do it
+
+	push	.w [bp][4]	/ Push down tapiov
+	call	__repsts	/ Call getsts to decode bad news
+	pop	cx		/ Unload frame 
+	sub	ax,ax		/ Clear ax
+	jmp	c_ret		/ return to main
+
+Lexit: 		
+	mov.w	ax,1		/ Return true
+	jmp	c_ret		/ return to main
+
+/****************************************************************************
+
+_zapin:
+	call	c_sav
+
+	mov	si,.w [bp][6]	/ si get buffer pointer
+	sub	di,di		/ di is loop and is set to 0
+	mov	cx,.w [bp][8]	/ cx is the limit
+	mov	dx,1		/ dx gets a 1 
+
+Rloop: 
+	cmp	di,cx		/ is di < bytes
+	jae	Rexit		/ l3 is exit if loop overflows
+	
+RPPIloop: 
+	in	al,0xCC		/ Get status from PPI
+
+	test	al,dl		/ Check for PPI flag set
+	je	ROBFcheck	/ Go back if not set (must wait)
+
+	in	al,0x90
+
+	mov	bx,si		/ Get the address contained in si (buffer)
+	inc	si		/ Increment it for next time
+	mov	.b [bx],al	/ put target byte (indirection) into low a
+	
+	inc	di		/ increment loop
+	jmp.s 	Rloop		/ start loop over
+
+ROBFcheck:
+	in 	al,0x82		/ Read in from upi
+
+	test	al,dl		/ Test for UP_OBF flag
+	je	RPPIloop	/ Go do it
+
+	push	.w [bp][4]	/ Push down tapiov
+	call	__repsts	/ Call getsts to decode bad news
+	pop	cx		/ Unload frame 
+	sub	ax,ax		/ Clear ax
+	jmp	c_ret		/ return to main
+
+Rexit: 		
+	mov.w	ax,1		/ Return true
+	jmp	c_ret		/ return to main
+

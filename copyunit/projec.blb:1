@@ -1,0 +1,28 @@
+	Scott Halbert Projects  Oct-86 to Feb-87
+
+	Oct-86->Dec-86
+
+	Main project in this time was to design, integrate, and program
+	a self contained unit to be installed in the China Data
+	Management Center in Beijing, China, which quickly copies data
+	cartridges from the China Digital Seismograph Network.  Cartridges
+	can be copied onto other cartridges or can be copied onto 9-track
+	magtape to be read by the Data Management Center software.
+	Diagnostic data dumps can also be made on the console.
+
+	January 87.
+
+	Scott will be implementing a procedure for converting the seismic
+	data cartridges from Dry Valleys Seismic Project in Antartica into
+	China tape format to allow it to be processed by the ASL seismic
+	network data processing software.
+
+	Some initial development work may be under way to design a replacement
+	for the systems controller board in the SRO seismic systems, which 
+	have become nearly impossible to repair.
+
+	February 87.
+
+	Scott will be in China installing the Cartridge	Duplicator machine, 
+	and will be assisting John Hoffman with software problems involved 
+	in the main software used in the China Data Management Center.

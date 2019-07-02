@@ -1,0 +1,95 @@
+\begin{verbatim}
+/*----------------------------------------------------------------------*
+ *  C h i n a   D i g i t a l   S e i s m o g r a p h   N e t w o r k   *
+ *     iSBC 86/14 - Project Recorder Handling and Event Detection       *
+ *----------------------------------------------------------------------*
+ *      CSFILT.H - Contants, filters and constants for event detector   *
+ *----------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------*
+ *      Modification and history                                        *
+ *-----Edit---Date----Who-------Description of changes------------------*
+ *      000 13-Jun-85 SH        New Template                            *
+ *      001 10-Apr-86 SH        Begin History                           *
+ *      002 15-Apr-86 SH        Enter New broadband filters             *
+ *      003 16-Apr-86 SH        Change LDM to 40 to handle edit #2      *
+ *----------------------------------------------------------------------*/
+
+/*------------------------Operational Constants-------------------------*/
+
+#define E_B     100     /* size of buffers in event()   */
+#define LDM     40      /* max lookback required for filter  [006]*/
+#define MAX_PER 5       /* maximum expected period (sec)*/
+#define RO      2       /* round off for period est.    */
+#define CUR_MAX 20      /* Maximum looping for record timing see [021] */
+#define TIM_OFF 2       /* Time until event detector turned back on */
+#define B_M1    (E_B - 1)       /*buffer pointer ---- event */
+#define B_M2    (E_B - 2)
+#define B_M3    (E_B - 3)
+#define B_M4    (E_B - 4)       
+
+/*----------------------Old 20 SPS filter-------------------------------*/
+
+#define aSH_20 >>3     /* shift for 20 samples/sec filter */
+#define f1a20a(x) (*x<<1) + (*(x-1)<<2) + (*(x-2)<<1) \
+                 - (*(x-5)) -(*(x-6)<<1) -(*(x-7))
+
+/*---------------------Reduced form of 20 SPS filter----------------------*/
+
+#define bSH_20 >>3     /* shift for 20 samples/sec filter */
+#define f1b20a(x) (- *(x-5) - *(x-7)) + (*x + (*(x-2) \
+                 - *(x-6))<<1) + (*(x-2)<<2)
+
+/*---------------------New broadband FIR filter-------------------------*/
+
+#define cSH_20 >> 5
+#define f1c20a(x) (- *(x-1) - *(x-2) - *(x-3) - *(x-4) - *(x-5) \
+                - *(x-6) - *(x-7) - *(x-8))<<2
+#define f1c20b(x) (- *(x-9) - *(x-10) - *(x-11) - *(x-12) + *(x-19) \
+                + *(x-20) + *(x-21))<<1
+#define f1c20c(x) (- *(x-13) - *(x-14) + *(x-22) + *(x-23) + *(x-24) \
+                + *(x-25) + *(x-26))
+#define f1c20d(x) (- *(x-15) + *(x-27) + *(x-28) + *(x-29))>>1
+#define f1c20e(x) (- *(x-16) + *(x-18) + *(x-30) + *(x-31) + *(x-32))>>2
+#define f1c20f(x) ((*(x-33) + *(x-34))>>3) + (*(x-35)>>4) \
+                + ((*(x-36) - *(x-17))>>5) + (*x<<5)
+                
+/*---------------------Old 40 SPS filter--------------------------------*/
+
+#define aSH_40 >>4     /* shift for 40 samples/sec filter */
+#define f1a40a(x) (*x<<1) + (*(x-1)<<2) + (*(x-2)<<2) + (*(x-2)<<1) 
+#define f1a40b(x) (*(x-3)<<3) + (*(x-4)<<2) + (*(x-4)<<1) + (*(x-5)<<2)
+#define f1a40c(x) (*(x-6)<<1) - (*(x-10)) - (*(x-11)<<1) - (*(x-12)<<1)
+#define f1a40d(x) - (*(x-12)) - (*(x-13)<<2) - (*(x-14)<<1) - (*(x-14))
+#define f1a40e(x) - (*(x-15)<<1) - (*(x-16))
+
+/*--------------------Reduced form of 40 SPS filter-----------------------*/
+
+#define bSH_40 >>4     /* shift for 40 samples/sec filter */
+#define f1b40a(x) (- *(x-10) - *(x-12) - *(x-14) - *(x-16))
+#define f1b40b(x) (*x + *(x-2) + *(x-4) + *(x-6) - *(x-11) - *(x-12) \
+                - *(x-14) - *(x-15))<<1
+#define f1b40c(x) (*(x-1) + *(x-2) + *(x-4) + *(x-5) - *(x-13))<<2
+#define f1b40d(x) *(x-3)<<3
+
+/*---------------------80 SPS filter (unoptimized)----------------------*/
+
+#define aSH_80 >>5     /* shift for 80 samples/sec filter */
+#define f1a80a(x) (*x<<1)+(*(x-1)<<2)+(*(x-2)<<1) +(*(x-2)<<2) 
+#define f1a80b(x) (*(x-3)<<3) +(*(x-4)<<1)+(*(x-4)<<3) +(*(x-5)<<3) 
+#define f1a80c(x) (*(x-5)<<2) - (*(x-6)<<1) +(*(x-6)<<4) +(*(x-7)<<4)
+#define f1a80d(x) -(*(x-8)<<1)+(*(x-8)<<4)+(*(x-9)<<3)+(*(x-9)<<2)
+#define f1a80e(x) (*(x-10)<<3) +(*(x-10)<<1)+(*(x-11)<<3)+(*(x-12)<<1)
+#define f1a80f(x) (*(x-12)<<2)+(*(x-13)<<2)+(*(x-14)<<1) - (*(x-20)) 
+#define f1a80g(x) -(*(x-21)<<1) -(*(x-22)<<1) - (*(x-22)) - (*(x-23)<<2) 
+#define f1a80h(x) - (*(x-24)<<2) - (*(x-24)) - (*(x-25)<<2) -(*(x-25)<<1)
+#define f1a80i(x) - (*(x-26)<<3) + (*(x-26)) - (*(x-27)<<3) - (*(x-28)<<3)
+#define f1a80j(x) (*(x-28)) - (*(x-29)<<2) - (*(x-29)<<1) - (*(x-30)<<2) 
+#define f1a80k(x) - (*(x-30)) - (*(x-31)<<2) -(*(x-32)<<1) -(*(x-32)) 
+#define f1a80l(x) -(*(x-33)<<1) -(*(x-34))
+
+/*----------------Default four point average filter----------------------*/
+
+#define SHFT_DEF >>2    /* Shift for default filter */
+#define fil_def(x) (*x) + (*(x-1)) + (*(x-2)) + (*(x-3))    /*[006]*/
+\end{verbatim}

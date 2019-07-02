@@ -1,0 +1,173 @@
+/*----------------------------------------------------------------------*
+ *  C h i n a   D i g i t a l   S e i s m o g r a p h   N e t w o r k	*
+ *									*
+ *	CSCONT.H - Context information for event detect algorithm	*
+ *									*
+ *	Contains information used to analyse seismic events.  There	*
+ *	is one of these buffers for each discrete channel being 	*
+ *	checked.  							*
+ *----------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------*
+ *	Modification and history of CSCONT.H				*
+ *									*
+ *-----Edit---Date----Who-------Description of changes------------------*
+ *	001 12-Jul-85 JNM	Convert from allpoint.h			*
+ *	002 31-Jul-85 SH	Clean up, convert to CDSN standards	*
+ *	003  1-Aug-85 SH	Regroup variables for legibility	*
+ *	004  1-Aug-85 JNM	Remove hardcode channel sizes, etc.	*
+ *	005 10-Sep-85 JNM	Lookback for filter as a variable       *
+ *	006 10-Sep-85 JNM	lst_amp a context variable from external*
+ *	007 27-Jan-86 SH	Make the ch_name a pointer 		*
+ *	008 14-Feb-86 SH	Make the record # tracking variables	*
+ *				 to support edit [021] in csevdt	*
+ *	009 12-Mar-86 SH	Make N_HITS into a context variable	*
+ *	010  7-Apr-86 SH	Add new detector parameters		*
+ *----------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------*
+ *	This file is a modification of allpoint2.h, copied from 	*
+ *	allpoint2.h on 12 July 85.  In addition, objections of the 	*
+ *	Whitesmith linker, noted in whtvar.c, have been addressed 	*
+ *	herein. Furthermore, the variables sam_rec, ms_sam, sam_haf, 	*
+ *	sam_sec have been added to the structure one below.  These 	*
+ *	parameters were originally defined with #define.		*
+ *									*
+ *			Definitions:					*
+ *				P     peak value			*
+ *				T     trough value			*
+ *				P-T   peak-to-trough difference		*
+ *				   or trough to-peak difference		*
+ *----------------------------------------------------------------------*/
+
+struct con_sto {
+/*-----------------Variables used in e_detect------------------------------*/
+
+	INT16 fil_error;        /* inhibits error messages--main*/
+	TEXT *ch_name;		/* Name of detector stored in e_detect */
+	INT16 ch_no;		/* [004] Channel number offset 
+				   if order is ZNE, 0=Z, 1=N, 2=E */
+	INT8  cur_rec;		/* [008] Number of last loaded record */
+	INT16 no_ch;		/* [004] Total number of channels in rec */
+	INT16 sam_ch;		/* [004] Total number samples per record */
+	INT16 ldr;              /* [005] Look back for filter */
+
+/*-------------Variable Used from event subroutine-------------------------*/
+
+	INT16 buf_flg[E_B];	/* flags: 1 if > th2; 2 if > th1 */
+	INT16 buf_sc[E_B];	/* summed delta sample counts */
+	INT32 buf_amp[E_B];	/* P-T amplitudes values */
+	INT16 buf_tim[E_B];	/* time coordinate of P-T values */
+	INT8  buf_rec[E_B];	/* [008] Record number for time */
+
+	INT16 abuf_sc[4];	/* last 4 delta sample counts */
+	INT32 abuf_amp[4];	/* last 4 P-T amplitudes */
+	INT16 abuf_tim[4];	/* time cord. of last 4 P-T values */
+	INT8  abuf_rec[4];	/* [008] Record number for time */
+	INT32 lst_amp;          /* last P-T value      [006] */
+
+	BOOL epf;		/* event possible flag */
+	BOOL evon;		/* event declared flag */
+	BOOL icheck;		/* flag, ensures period estimate */
+
+	INT16 filhi;		/* see OF Report 83-785 */
+	INT16 fillo;		/* see OF Report 83-785 */
+	INT16 iwin;		/* window length (samples) */
+
+	INT16 n_hits;		/* Number of hits > xth2 */
+
+	INT16 wait_blk;		/* Number of output points per block */
+	INT16 def_tc;		/* Default time correction value */
+				
+	INT16 def_itc;		/* Default tape counter size */
+	INT16 val_avg;		/* Number of times ptwo runs */
+
+	INT16 fbp;		/* first buffer pointer */
+	INT16 indx;		/* saves fbp */
+	INT16 cbp;		/* current buffer pointer */
+	INT16 cbp2;		/* cbp checked for overflow */
+	INT16 lbp;		/* last buffer pointer */
+	INT16 lbp2;		/* lbp corrected for overflow */
+	INT16 index2;		/* counter,checked for overflow */
+
+	BOOL iset;		/* flag, = 1 when th1 exceeded */
+
+	INT16 jj;		/* index for abrev buffers abuf */
+	INT16 sumdsc;		/* sum delta sample count */
+	INT16 sumflg;		/* number of P-T values > th2 */
+	INT16 last_sc;		/* loaded to abuf_sc[] */
+	INT16 last_tim;		/* loaded to abuf_tim[] */
+	INT8  rec_tim;		/* [008] Record # of last_tim */
+	INT32 th1;		/* largest detection threshold */
+	INT32 th2;		/* smallest detection threshold */
+
+/*---------------------Variables used in p_one----------------------------*/
+
+	INT32 last_y;		/* amplitude coordinate of previous sample */
+	INT16 last_x;		/* time coordinate of previous sample */
+	INT8  rec_x;		/* [008] Record # of last_x */
+	INT16 sum_s_c;		/* delta sample count */
+	INT16 s_sum_sc;		/* saved delta sample count */
+	INT16 index;		/* counter, calls ptwo */
+	INT32 max_y;		/* amplitude coordinate of former P/T value */
+	INT16 tim_of_y;		/* time coordinate of last P or T value */
+	INT8  rec_of_y;		/* [008] Record # of tim_of_y */
+	BOOL prev_sin;		/* sign of last difference (TRUE for neg) */
+	INT32 maxamp;		/* abs max of 20 consec. P-T values < thx */
+	INT32 thx;		/* upper bound for noise est. */
+	INT32 s_amp;		/* signed amplitude of P-T value */
+
+/*----------------------Variables used in p_two---------------------------*/
+
+	INT32 tsstak[16];	/* contains set of maxamp values */
+	INT32 twosd;		/* statistical dispersion of P-T values */
+	INT16 kk;		/* index for tsstak[] */
+
+/*----------------------Variables used in pass_one------------------------*/
+
+	INT16 kont_per;         /* counts per period */
+	INT16 ms_sam;		/* milliseconds per sample */
+	INT16 sam_haf;		/* samples per one-half sec */
+	INT16 sam_rec;		/* samples per record */
+	INT16 sam_sec;          /* samples per second */
+	INT16 sec_rec;          /* samples per second */
+
+/*----------------------Variables used in indat---------------------------*/
+
+	INT32 sav_data[LDM];    /* LDM values reserved for filter lookback*/
+				/* [005] */
+
+/*----------------------Variables used in onsetq--------------------------*/
+
+	INT32 th3;		/* threshold for estimating onset */
+
+/*----------------------Variables used in ibingo--------------------------*/
+
+	INT16 itc;		/* counter for conceptual output */
+
+/*----------------------Variables used in dum_out-------------------------*/
+
+	BOOL itrf;  		/* flag, = 1 for conceptual write activated */
+	INT16 nn;		/* counts conceptual output samples */
+
+/*----------------------Variables used in xth-----------------------------*/
+
+	INT16 xth1;		/* coded threshold factor -- xth*/
+	INT16 xth2;		/*           "			*/
+	INT16 xth3;		/*           "			*/
+	INT16 xthx;		/*           "			*/
+				/* th1>th2>thx>th3 or th1>thx>th2>th3	*/
+
+/*----------------Variables which are not yet implemented------------------*/
+
+	INT16 sptc;		/* records to be written to tape--rec_len*/
+#ifdef comment
+	INT16 k_m_mic;		/* counts per millimicron -- findl*/
+	INT16 lef;		/* flag, large event in progress -- rec_len*/
+	INT16 lepf;		/* flag, large event possible -- rec_len*/
+	INT16 levsav;		/* saves largest previous level -- rec_len*/
+#endif
+
+};
+
+#define CONTEXT struct con_sto	/* Do a typedef for context data type */

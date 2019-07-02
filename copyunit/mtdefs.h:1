@@ -1,0 +1,80 @@
+#define MT_READ 1		/* Read in a tape block */
+#define MT_WRITE 2		/* Write a tape block */
+#define MT_MARK 3		/* Write a tape mark */
+#define MT_SPBK 4		/* Space forward 1 block */
+#define MT_RVBK 5		/* Backspace 1 block */
+#define MT_SPFL 6		/* Space forward 1 file */
+#define MT_RVFL 7		/* Backspace 1 file */
+#define MT_REWI 8		/* Rewind to BOT */
+#define MT_OFFL 9		/* Rewind and offline drive */
+
+#define ST_HDE	0x0001		/* Hard data error */
+#define ST_BOT	0x0002		/* Drive now at BOT */
+#define ST_EOT	0x0004		/* Drive now at EOT */
+#define ST_RDY 	0x0008		/* Drive is ready (on) */
+#define ST_ONL	0x0010		/* Tape is on line */
+#define ST_WPT	0x0020		/* Tape is write locked */
+#define ST_EOF	0x0040		/* Last read hit tape mark */
+
+#define R_A_FBY		0x0001
+#define R_A_RDY		0x0002
+#define R_A_RSTR	0x0004
+#define R_A_WSTR	0x0008
+#define R_A_DBY		0x0010
+#define R_A_CER		0x0020
+#define R_A_HER		0x0040
+#define R_A_FMK		0x0080
+
+#define R_C_EOT		0x0002
+#define R_C_RWD		0x0004
+#define R_C_ONL		0x0008
+#define R_C_FPT		0x0010
+#define R_C_LDP		0x0020
+#define R_C_WFLG	0x0040		/* New write flag */
+#define R_C_NRZ		0x0080
+
+#define W_A_GO		0x0001
+#define W_A_FEN		0x0002
+#define W_A_TAD0	0x0004
+#define W_A_TAD1	0x0008
+#define W_A_FAD		0x0010
+#define W_A_DEN		0x0020
+#define W_A_WRT		0x0040
+#define W_A_REV		0x0080
+
+#define W_C_REW		0x0001
+#define W_C_OFL		0x0002
+#define W_C_WFM		0x0004
+#define W_C_EDIT	0x0008
+#define W_C_ERASE	0x0010
+#define W_C_LWD		0x0020
+#define W_C_WP		0x0040
+
+#define MTA_READ 0
+#define MTC_READ 0
+#define MTA_WRITE (W_A_WRT)
+#define MTC_WRITE 0
+#define MTA_MARK (W_A_WRT)
+#define MTC_MARK (W_C_WFM)
+#define MTA_SPBK 0
+#define MTC_SPBK (W_C_ERASE)
+#define MTA_RVBK (W_A_REV)
+#define MTC_RVBK (W_C_ERASE)
+#define MTA_SPFL 0
+#define MTC_SPFL (W_C_WFM|W_C_ERASE)
+#define MTA_RVFL (W_A_REV)
+#define MTC_RVFL (W_C_WFM|W_C_ERASE)
+
+#define GETRA()	((in(0xc8))&0xFF)
+#define GETRB()	((~in(0xca))&0xFF)
+#define GETRC()	((~in(0xcc))&0xFF)
+#define GETDAT() GETRB()
+#define SETR(x) out(0xce,x)
+
+#define PUTWA(x) out(0xa0, (x))
+#define PUTWB(x) out(0xa2, (x))
+#define PUTWC(x) out(0xa4, (x))
+#define PUTDAT(x) PUTWB(x)
+#define SETW(x) out(0xa6, x)
+
+#define CLRWF() out(0xC1, 0xFF)	/* Clear the write strobe flag */

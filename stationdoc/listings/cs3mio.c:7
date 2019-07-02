@@ -1,0 +1,1509 @@
+\begin{verbatim}
+/*----------------------------------------------------------------------*
+ *  C h i n a   D i g i t a l   S e i s m o g r a p h   N e t w o r k   *
+ *     iSBC 86/14 - Project Recorder Handling and Event Detection       *
+ *----------------------------------------------------------------------*
+ *      CS3MIO.C - Programming for I/O, and error control for 3M        *
+ *      HCD-75 cartridge tape drive running on the iSBX 217B interface  *
+ *      These routines are not customised for any given processor.      *
+ *      The processor dependent stuff is in CS3MCF.H                    *
+ *                                                                      *
+ *      The public subroutines and status words are to serve as a       *
+ *      portable tape standard which could be easilty replaced          *
+ *      or modified to support another output device.                   *
+ *                                                                      *
+ *      All variables and subroutines starting with an underline "_"    *
+ *      are internal to the driver and are never to be used in the      *
+ *      portable sections of any other program.                         *
+ *----------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------*
+ *      This software was written by Scott Halbert for the Albuquerque  *
+ *      Seismological Laboratory (US Geological Survey).                *
+ *----------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------*
+ *      Modification and history of CS3MIO.C                            *
+ *                                                                      *
+ *-----Edit---Date----Who-------Description of changes------------------*
+ *      001  8-Jul-85 SH        Beginning of Coding                     *
+ *      002 17-Jul-85 SH        Remove all alloc's for ROM              *
+ *      003 25-Jul-85 SH        Rehash the init and open routines       *
+ *      004 20-Aug-85 SH        Add the verify routine put in write     *
+ *      005 10-Jan-86 SH        Complete the error print routine        *
+ *      006 16-Jan-86 SH        Add records written and errors          *
+ *      007  3-Feb-86 SH        Add some better diagnostics             *
+ *      008  4-Feb-86 SH        Don't display open errors trivially     *
+ *      009 10-Feb-86 SH        _recnt get bigger than an int           *
+ *                               This version (V1.1) went to China on   *
+ *                               18-Feb-86, next edit to be V1.2        *
+ *      010  3-Mar-86 SH        Begin advanced tape command functions   *
+ *                               for read/write HCD-75 ram, and read    *
+ *                               in tape record                         *
+ *      011  4-Mar-86 SH        Put clock loops in all signal waits so  *
+ *                               we can detect (at least print out)     *
+ *                               races with 217B                        *
+ *      012  6-Mar-86 SH        Don't to advanced errors during an error*
+ *                               so we don't get a recursive loop       *
+ *      013  7-Mar-86 SH        When sense returns bogus info, go out   *
+ *                               and request status again and use that  *
+ *      014 10-Mar-86 SH        Add a ram write routine                 *
+ *      015 10-Mar-86 SH        Add a tape read routine - combine with  *
+ *                               write routine and rename _iobuf        *
+ *      016 13-Mar-86 SH        Add Error statistics summaries          *
+ *      017 19-Mar-86 SH        Allow errors to unwind better           *
+ *      018 25-Mar-86 SH        Continue with unwind routines           *
+ *      019 10-Apr-86 SH        Fancy up documentation for next release *
+ *----------------------------------------------------------------------*/
+
+char *cs3mio = "cs3mio V1.2[019]";
+
+/*----------------------------------------------------------------------*
+ *      List of subroutines to be defined in CS3MIO.C for tape I/O      *
+ *----------------------------------------------------------------------*
+ *      VOID clos_tap(tapiov)           Close and unlock tape drive     *
+ *      VOID init_tape()                Initializes the tape I/O        *
+ *      VOID tap_mark(tapiov)           Write a tape mark here          *
+ *      VOID tap_rewind(tapiov)         Rewind channel                  *
+ *      TAPE *tape_open(drive)          Open and init tape drive        *
+ *      VOID wrt_blk(tapiov,bufad,len)  Write a given buffer out        *
+ *----------------------------------------------------------------------*
+ *      VOID _adv_tape(tapiov)          Logically advance tape          *
+ *      VOID _getsts(tapiov)            Get the sense bytes             *
+ *      VOID _out_buf(tapiov,bufnm)     Write 3M buffer with retries    *
+ *      VOID _puberr(tapiov)            Set public status stuff         *
+ *      VOID _tapact(tapiov,cmdnum)     Execute any 1 byte command      *
+ *      VOID _errtap()                  Display last sense on console   *
+ *      BOOL _iobuf(tapiov,buff,io)     Transfer 1 3M buffer (internal) *
+ *      VOID _verify(tapiov)            Verify last buffer written      *
+ *--------------------Advanced Diagnostic Commands----------------------*
+ *      WORD _rdram(tapiov,addrs)       Read an HCD-75 memory register  *
+ *      VOID _wrtram(tapiov,addrs,cont) Write an HCD-75 memory register *
+ *----------------------------------------------------------------------*/
+
+/************************************************************************/
+
+#define _tapdef                 /* Make sure cdsn3m.h doesn't do tapsts */
+#include "src:csstnd.h"         /* Setup Constants/Configuration */
+#include "src:cs3mio.h"         /* Tape drive constants */
+#include "src:cs3mcf.h"         /* Configuration information */
+#undef _tapdef                  /* Clean up symbol table */
+
+/************************************************************************/
+
+BYTE _senbyt[MAX_SNS] = {0};    /* The sense bytes - _senbyt[0] is count */
+BYTE _parbyt[4] = {0};          /* Parameter bytes */
+BYTE _tmp3mb[BSZ_3M] = {0};     /* Temporary 3m buffer (no allocs) */
+BOOL _inadv = 0;                /* In an advanced error */
+BOOL _unwind = 0;               /* We are unwinding from an error? */
+BOOL _startp = 0;               /* Are we in startup mode? */
+
+/************************************************************************/
+
+/*----------------------------------------------------------------------*
+ *      Function: VOID clos_tap(tapiov) - Flap drive and close IOV      *
+ *----------------------------------------------------------------------*
+ *      Perform a cassette unload operation, then free the IOV          *
+ *                                                                      *
+ *      A peculiar hardware feature in the tape system causes the       *
+ *      OBF to not come up (signalling end of operation), until         *
+ *      some 90 seconds after the FLAP command.  It also does this      *
+ *      occasionally when errors occur.                                 *
+ *----------------------------------------------------------------------*
+ *      Arguments:      tapiov - where the tape IOV is                  *
+ *----------------------------------------------------------------------*/
+
+VOID clos_tap(tapiov)
+TAPE *tapiov;
+{
+        
+        TRACER("clos_tap");
+
+        _unwind=FALSE;                  /* [017] */
+        _startp=TRUE;                   /* We will always get a no
+                                           cartridge error here */
+
+        _tapact(tapiov,CM_FLAP);        /* do CM_FLAP error in taperr */
+
+        _startp=FALSE;
+        RETURN_VOID;                    /* Return an error state */
+
+}
+/*----------------------------------------------------------------------*
+ *      Function: VOID init_tape() - Reset & setup tape subsystem       *
+ *----------------------------------------------------------------------*
+ *      Perform a CM_RESET to initialize the interface board, and do    *
+ *      the initialize to the PPI port.  Set any errors in error regs   *
+ *      Note that the ST_SOK bit comes up on init if all is ok          *
+ *----------------------------------------------------------------------*
+ *      Arguments:      none - data is retrieved from the drive array   *
+ *----------------------------------------------------------------------*
+ *      Fatal Errors:   Will abort if SBX is illegal or won't come up   *
+ *----------------------------------------------------------------------*/
+
+VOID init_tape()
+{
+
+        BYTE port,unit,drive,oport;
+
+        TAPE *dumtap;
+
+        TRACER("init_tape");
+
+        _unwind=FALSE;
+        _startp=TRUE;
+
+        oport = 0xFF;
+
+        for (drive=0; drive<DRIVES; drive++) {
+
+                port=drvarr[drive].d_port;
+                unit=drvarr[drive].d_unit;
+
+                dumtap=drviov+drive;
+
+                dumtap->_sbx_prt=port;                  /* SBX port */
+                dumtap->_drive_u=unit;                  /* 3M drive unit */
+                dumtap->_upi_sp=__portl[port].__upi_s;  /* UPI status port */
+                dumtap->_drv_st=__portl[port].__drv_s;  /* Drive Status Prt */
+                dumtap->_datap=__portl[port].__data;    /* Data Port addres */
+                dumtap->_block=FST_BLK-1;               /* Start location */
+                dumtap->_track=0;                       /* Current track */
+                dumtap->_mblock=MAX_B3M;                /* Hard block max */
+                dumtap->_mtrack=MAX_T3M;                /* Hard track max */
+
+                if (oport!=port) {              /* Port not yet reset */
+                        _tapact(dumtap,CM_RESET);
+                        if ((!(_senbyt[1]&E1_DNR&&_senbyt[0]==3))||_unwind) 
+                            p_fatal("init_tape","cannot bring up iSBX 217B");
+                }
+
+                oport=port;
+
+                _tapact(dumtap,CM_INIT);        /* Init that drive */
+
+        }
+        
+        _startp=FALSE;
+        RETURN_VOID;
+
+}
+/*----------------------------------------------------------------------*
+ *      Function: VOID tap_mark(tapiov) - Advance and write a tape mk   *
+ *----------------------------------------------------------------------*
+ *      Advance block/track and write 1 tape mark.                      *
+ *----------------------------------------------------------------------*
+ *      Arguments:      tapiov - a TAPE type IOV where specs are        *
+ *----------------------------------------------------------------------*/
+
+VOID tap_mark(tapiov)
+TAPE *tapiov;
+{
+
+        TRACER("tap_mark");
+
+        _unwind=FALSE;                  /* [017] */
+
+        _adv_tape(tapiov);              /* Advance logical location */
+
+        if (_unwind) RETURN_VOID;       /* [017] Get out */
+
+        _tapact(tapiov,CM_MARK);        /* Write a tape mark */
+
+        if (_unwind) RETURN_VOID;       /* [017] Get out */
+
+        RETURN_VOID;
+
+}
+\end{verbatim}
+\begin{verbatim}
+/*----------------------------------------------------------------------*
+ *      Function: VOID tap_rewind(tapiov) - Rewind tape                 *
+ *----------------------------------------------------------------------*
+ *      Logically rewind tape drive - just sets IOV variables to the    *
+ *      location of the first block -1.  First Read/Write does the      *
+ *      rewind.                                                         *
+ *----------------------------------------------------------------------*
+ *      Arguments:      tapiov - a TAPE type IOV where specs are        *
+ *----------------------------------------------------------------------*/
+
+VOID tap_rewind(tapiov)
+TAPE *tapiov;
+{
+
+        TRACER("tap_rewind");
+
+        _unwind=FALSE;                  /* [017] */
+
+        tapiov->_block=FST_BLK-1;       /* Hypothetical last location */
+        tapiov->_track=0;               /* Current track */
+
+        RETURN_VOID;
+}
+/*----------------------------------------------------------------------*
+ *      Function: TAPE *tape_open(drive) - Open and setup tape          *
+ *----------------------------------------------------------------------*
+ *      Validate arguments, perform a CM_INIT on drive, and return      *
+ *       current status information.  Fatal errors will cause the       *
+ *       subroutine to attempt to unload the cassette and log the       *
+ *       sense bytes on the console.                                    *
+ *----------------------------------------------------------------------*
+ *      Arguments:      drive - the logical drive designation           *
+ *----------------------------------------------------------------------*
+ *      Returns:        A pointer to struct _tape3m (TAPE), which       *
+ *                        is used as the standard I/O vector in tape    *
+ *                        operations.  Contains status, addresses, etc. *
+ *                      Return NULL for error conditions                *
+ *----------------------------------------------------------------------*
+ *      Fatal Errors:   Program will do a fatal abort if the arguments  *
+ *                       are invalid or illegal                         *
+ *----------------------------------------------------------------------*/
+
+TAPE *tape_open(drive)
+BYTE drive;
+{
+        
+        BYTE port,unit,*adptr;
+        WORD tmperr,tmpsts,umode;
+        TAPE *newtap;
+
+        TRACER("tape_open");
+
+        _unwind=FALSE;                  /* [017] */
+        _startp=TRUE;
+
+/*------Validate port and unit via stored validation information------------*/
+
+        if (drive>=DRIVES) p_fatal("tape_open","illegal drive seen");
+
+        port=drvarr[drive].d_port;
+        unit=drvarr[drive].d_unit;
+
+/*------Attempt to allocate memory for the TAPE buffer IOV to return--------*/
+
+        newtap=drviov+drive;
+
+/*------Initialize the buffer to the correct standard initial settings------*/
+
+        newtap->_sbx_prt=port;                  /* SBX port */
+        newtap->_drive_u=unit;                  /* 3M drive unit number */
+        newtap->_upi_sp=__portl[port].__upi_s;  /* UPI status port add */
+        newtap->_drv_st=__portl[port].__drv_s;  /* Drive Status Port */
+        newtap->_datap=__portl[port].__data;    /* Data Port address */
+        newtap->_block=FST_BLK-1;               /* BOT -1 */
+        newtap->_track=0;                       /* Current track */
+        newtap->_mblock=MAX_B3M;                /* Hardcode block max */
+        newtap->_mtrack=MAX_T3M;                /* Hardcode */
+        newtap->_recnt=0;                       /* [006] Clear write count */
+        newtap->_wrter=0;                       /* [006] Clear error count */
+#ifdef ERRSTAT
+        newtap->_datcom=0;                      /* [016] data compare errs */
+        newtap->_keycom=0;                      /* [016] key compare errs */
+        newtap->_framer=0;                      /* [016] frame errors */
+#endif
+
+/*------Check on physical device, and check the status bits on return-----*/
+
+        _tapact(newtap,CM_STAT);        /* do CM_STAT error in taperr */
+        if (_unwind) {
+                _startp=FALSE;
+                RETURN_VOID;
+        }
+
+        tmperr=taperr;
+        tmpsts=tapsts;                  /* Keep copy of the last status */
+
+        if (taperr==0) {
+#ifdef ADVTAPF
+#ifdef MANFACBLK
+                p_warn("Extended Controller status word ");
+        p_number((INT32) (_rdram(newtap,0x2325) & 0xFFFF),16,4,TRUE);
+                p_cont();
+                p_disp("Extended Drive status word      ");
+        p_number((INT32) (_rdram(newtap,0x2326) & 0xFFFF),16,4,TRUE);
+                p_cont();
+                p_disp("Certify and verify scope        ");
+        p_number((INT32) (_rdram(newtap,0x231E) & 0xFFFF),16,4,TRUE);
+                p_cont();
+                p_disp("Current key mode (0 user,1 abs) ");     
+                umode=_rdram(newtap,0x2328);
+                p_number((INT32) umode & 0xFFFF,16,4,TRUE);
+                p_crlf();
+                if (umode!=0x0001) {
+                        _wrtram(newtap,0x2328,0x0001);  /* Set abs */
+                        umode=_rdram(newtap,0x2328);
+                        if (umode!=0x0001) {
+                                p_disp("Can't put drive in user mode [");
+                                p_number((INT32) umode & 0xFFFF,16,4,TRUE);
+                                p_disp("]");
+                                taperr=tmperr;
+                                tapsts=tmpsts;  /* See the orig error */
+                                _startp=FALSE;
+                                RETURN(newtap);
+                        }
+                }
+                adptr=_tmp3mb;
+
+                newtap->_block=0;       /* Absolute block 0 */
+                newtap->_track=0;       /* Manufacturer's Block */
+
+                if (_iobuf(newtap,adptr,IO_READ)==FALSE) {
+                        p_warn("Cannot get manufacturer's block info\n\r");
+                        _wrtram(newtap,0x2328,0x0000);  /* Set abs */
+                        umode=_rdram(newtap,0x2328);
+                        if (umode!=0x0000) 
+                           p_fatal("tape_open","cannot set HCD-75 user mode");
+                        taperr=tmperr;
+                        tapsts=tmpsts;  /* See the orig error */
+                        _startp=FALSE;
+                        RETURN(newtap);
+                }
+
+                p_warn(adptr);  
+#endif
+
+#ifdef RAMWRT
+                _wrtram(newtap,0x2328,0x0000);  /* Set abs */
+                umode=_rdram(newtap,0x2328);
+                if (umode!=0x0000) 
+                    p_fatal("tape_open","cannot set HCD-75 user mode");
+                                
+                _wrtram(newtap,0x231e,0x0001);
+                                /* Attempt to set key and data verify */
+
+#endif
+                taperr=tmperr;
+                tapsts=tmpsts;                  /* See the orig error */
+
+                newtap->_block=FST_BLK-1;               /* BOT -1 */
+                newtap->_track=0;                       /* Current track */
+#endif
+                _startp=FALSE;
+                RETURN(newtap);
+        }
+
+        taperr&=~(ER_DNR | ER_NCP);     /* Ignore these error types */
+
+        if (taperr!=0) {
+                _tapact(newtap,CM_FLAP);        /* Attempt to unload tape */
+                if (_unwind) {
+                        _startp=FALSE;
+                        RETURN_VOID;
+                }
+        }
+
+        taperr=tmperr;
+        tapsts=tmpsts;                  /* See the error in init not flap */
+
+        _startp=FALSE;
+        RETURN(NULL);                   /* Return an error state */
+
+}
+/*----------------------------------------------------------------------*
+ *      Function: VOID wrt_blk(tapiov,bufad,len) - put buffer to tape   *
+ *----------------------------------------------------------------------*
+ *      Write as many 3m buffers as needed to write all of bufad        *
+ *      to tape.  If remainder is found, alloc up an extra buffer       *
+ *      to use for zero filling the remaining buffer.  Perform          *
+ *      error recovery operations if problems are found.                *
+ *----------------------------------------------------------------------*
+ *      Arguments:      tapiov - tape IOV                               *
+ *                      bufad - pointer out to the output buffer        *
+ *                      len - length of bufad (calc # of 3m buffs)      *
+ *----------------------------------------------------------------------*/
+
+VOID wrt_blk(tapiov,bufad,len)
+TAPE *tapiov;
+BYTE *bufad;
+WORD len;
+{
+
+        BYTE *adptr,*bufpt;
+        WORD bufnum,loop2;
+
+        TRACER("wrk_blk");
+
+        _unwind=FALSE;                  /* [017] */
+
+        adptr=NULL;
+
+        for (bufnum=0; bufnum<len; bufnum+=BSZ_3M) {
+
+                bufpt=(bufad+bufnum);
+                if ((len-bufnum)<BSZ_3M) {
+                        adptr=_tmp3mb;
+                        bufpt=adptr;
+                        for (loop2=0; loop2<BSZ_3M; loop2++) {
+                                if ((bufnum+loop2)<len)
+                                        bufpt[loop2]=bufad[bufnum+loop2];
+                                else    bufpt[loop2]=0;
+                        }
+                }
+
+                _out_buf(tapiov,bufpt);
+                if (_unwind||tapsts&ST_WTP||taperr!=0) RETURN_VOID;
+                                /* Tape prematurely terminated by a
+                                   bad error--data lost */
+
+        }
+
+        RETURN_VOID;
+
+}
+
+/************************************************************************/
+
+/*----------------------------------------------------------------------*
+ *      Function: BOOL obf_pause(subnam,sequence,tapiov) - Wait for OBF *
+ *----------------------------------------------------------------------*
+ *      Wait for the OBF bit in the UPI (tape drive status) to come     *
+ *      high.  Program will timeout if it must wait too long.           *
+ *----------------------------------------------------------------------*
+ *      Arguments:      TEXT *subnam - name of calling routine.         *
+ *                      TEXT *sequence - which call is this?            *
+ *                      TAPE *tapiov - tape drive information           *
+ *----------------------------------------------------------------------*
+ *      Returns:        Returns TRUE if there was an error or timeout   *
+ *                      Returns FALSE when OBF comes up                 *
+ *----------------------------------------------------------------------*/
+
+#define SINTIMOUT 20000
+#define MSGINT 10
+#define MSGMIN 40
+#define TOTALTIME 60
+
+BOOL _obf_pause(subnam,sequence,tapiov)
+TEXT *subnam, *sequence;
+TAPE *tapiov;
+{
+        
+        BYTE upi_reg,rdin;
+        INT16 loop;
+        INT16 itera;
+
+        TRACER("_obf_pause");
+
+        upi_reg=tapiov->_upi_sp;        /* Stow upi loc in fast memory */
+
+        for (itera=0; itera<TOTALTIME; itera++) {
+                for (loop=0; loop<SINTIMOUT; loop++) {
+                        if (rdin=in(upi_reg)&UP_OBF) RETURN(FALSE);
+                }
+                if (itera%MSGINT==0&&itera>=MSGMIN) {
+                        p_warn("Output Buffer full wait timeout - ");
+                        p_disp(subnam); p_disp(" seq:"); p_disp(sequence);
+#ifdef TRACE
+                        p_cont();
+                        _bak_trace();
+#endif
+                        p_crlf();
+                }
+        }
+        p_warn("Output Buffer timeouts exceeded - data may be lost");
+#ifdef TRACE
+        p_cont();
+        _bak_trace();
+#endif
+        p_crlf();
+        _unwind=TRUE;
+        RETURN(TRUE);
+}
+/*----------------------------------------------------------------------*
+ *      Function: BOOL ibf_pause(subnam,sequence,tapiov) - Wait for /IBF*
+ *----------------------------------------------------------------------*
+ *      Wait for IBF flag to go down.  Program will timeout if it waits *
+ *      too long.  Will abort if it finds OBF set at any time (OBFFOUND *
+ *      governs an OBF found error message).                            *
+ *----------------------------------------------------------------------*
+ *      Arguments:      TEXT *subnam - name of calling routine.         *
+ *                      TEXT *sequence - which call is this?            *
+ *                      TAPE *tapiov - tape drive information           *
+ *----------------------------------------------------------------------*
+ *      Returns:        Returns TRUE if there was an OBF or timeout     *
+ *                      Returns FALSE when IBF has gone down            *
+ *----------------------------------------------------------------------*/
+
+BOOL _ibf_pause(subnam,sequence,tapiov)
+TEXT *subnam, *sequence;
+TAPE *tapiov;
+{
+        
+        BYTE upi_reg,rdin;
+        INT16 loop;
+        INT16 itera;
+
+        TRACER("_ibf_pause");
+
+        upi_reg=tapiov->_upi_sp;        /* Stow upi loc in fast memory */
+
+        for (itera=0; itera<TOTALTIME; itera++) {
+                for (loop=0; loop<SINTIMOUT; loop++) {
+                        if (!(rdin=in(upi_reg)&UP_IBF)) RETURN(FALSE);
+                        if (rdin=in(upi_reg)&UP_OBF) {
+#ifdef OBFFOUND
+                                p_warn("Input Buffer Full Timeout Error ");
+                                p_disp("Found OBF set"); p_cont();
+                                p_disp(subnam); p_disp(" seq:"); 
+                                p_disp(sequence);
+#ifdef TRACE
+                                p_cont();
+                                _bak_trace();
+#endif
+                                p_crlf();
+#endif
+                                _getsts(tapiov);
+                                _unwind=TRUE;
+                                RETURN(TRUE);
+                        }
+                }
+                if (itera%MSGINT==0&&itera>=MSGMIN) {
+                        p_warn("Input Buffer full wait timeout - ");
+                        p_disp(subnam); p_disp(" seq:"); p_disp(sequence);
+#ifdef TRACE
+                        p_cont();
+                        _bak_trace();
+#endif
+                        p_crlf();
+                }
+        }
+        p_warn("Input Buffer timeouts exceeded - data may be lost");
+#ifdef TRACE
+        p_cont();
+        _bak_trace();
+#endif
+        p_crlf();
+        _getsts(tapiov);
+        _unwind=TRUE;
+        RETURN(TRUE);
+}
+\end{verbatim}
+\begin{verbatim}
+/*----------------------------------------------------------------------*
+ *      Function: BOOL sod_pause(subnam,sequence,tapiov) - Wait for SOD *
+ *----------------------------------------------------------------------*
+ *      Wait for the SOD bit in the UPI (tape drive status) to come     *
+ *      high.  Program will timeout if it must wait too long.  Program  *
+ *      will also abort if an OBF if found set (OBFFOUND governs        *
+ *      error messages).
+ *----------------------------------------------------------------------*
+ *      Arguments:      TEXT *subnam - name of calling routine.         *
+ *                      TEXT *sequence - which call is this?            *
+ *                      TAPE *tapiov - tape drive information           *
+ *----------------------------------------------------------------------*
+ *      Returns:        Returns TRUE if there was an OBF or timeout     *
+ *                      Returns FALSE when SOD comes up                 *
+ *----------------------------------------------------------------------*/
+
+BOOL _sod_pause(subnam,sequence,tapiov)
+TEXT *subnam, *sequence;
+TAPE *tapiov;
+{
+        
+        BYTE upi_reg,rdin;
+        INT16 loop;
+        INT16 itera;
+
+        TRACER("_sod_pause");
+
+        upi_reg=tapiov->_upi_sp;        /* Stow upi loc in fast memory */
+
+        for (itera=0; itera<TOTALTIME; itera++) {
+                for (loop=0; loop<SINTIMOUT; loop++) {
+                        if (rdin=in(upi_reg)&UP_SOD) RETURN(FALSE);
+                        if (rdin=in(upi_reg)&UP_OBF) {
+#ifdef OBFFOUND
+                                p_warn("Start of Data Timeout Error ");
+                                p_disp("Found OBF set"); p_cont();
+                                p_disp(subnam); p_disp(" seq:"); 
+                                p_disp(sequence);
+#ifdef TRACE
+                                p_cont();
+                                _bak_trace();
+#endif
+                                p_crlf();
+#endif
+                                _getsts(tapiov);
+                                _unwind=TRUE;
+                                RETURN(TRUE);
+                        }
+                }
+                if (itera%MSGINT==0&&itera>=MSGMIN) {
+                        p_warn("Start of Data wait timeout - ");
+                        p_disp(subnam); p_disp(" seq:"); p_disp(sequence);
+#ifdef TRACE
+                        p_cont();
+                        _bak_trace();
+#endif
+                        p_crlf();
+                }
+        }
+        p_warn("Start of Data timeouts exceeded - data may be lost");
+#ifdef TRACE
+        p_cont();
+        _bak_trace();
+#endif
+        p_crlf();
+        _getsts(tapiov);
+        _unwind=TRUE;
+        RETURN(TRUE);
+}
+/*----------------------------------------------------------------------*
+ *      Function: VOID _adv_tape(tapiov) - Logical Advance tape         *
+ *----------------------------------------------------------------------*
+ *      Internal Subroutine - Only for use locally within driver        *
+ *----------------------------------------------------------------------*
+ *      Increment the _track and _block data in the IOV to logically    *
+ *      advance the tapes position.  Acutal position does not occur     *
+ *      until next read/write activity.                                 *
+ *----------------------------------------------------------------------*
+ *      Arguments:      tapiov - the tape drive in question             *
+ *----------------------------------------------------------------------*
+ *      Returns:        VOIDs don't return anything                     *
+ *                      Public status and error registers have result   *
+ *----------------------------------------------------------------------*/
+
+_adv_tape(tapiov)
+TAPE *tapiov;
+{
+
+        TRACER("_adv_tape");
+
+        tapiov->_block+=1;
+        if (tapiov->_block>tapiov->_mblock) {
+                tapiov->_block=0;
+                tapiov->_track+=1;
+#ifdef TRACKT
+                p_warn("Starting tape track ");
+                p_numout(tapiov->_track,10);
+                p_disp(" on drive #");
+                p_numout(tapiov->_drive_u,10);
+                if (tapiov->_wrter>0) {
+                        p_cont();
+                        p_disp(" (Total errors on this tape so far are ");
+                        p_numout(tapiov->_wrter,10);
+                        p_disp(")");
+                }
+                p_crlf();
+#endif
+        }
+        if (tapiov->_track>tapiov->_mtrack) {   /* After end of tape */
+                tapiov->_block=tapiov->_mblock;
+                tapiov->_track=tapiov->_mtrack;
+        }
+
+        RETURN_VOID;
+
+}
+/*----------------------------------------------------------------------*
+ *      Function: VOID _getsts(tapiov) - Retreive status from drive     *
+ *----------------------------------------------------------------------*
+ *      Internal Subroutine - Only for use locally within driver        *
+ *----------------------------------------------------------------------*
+ *      Retreive the sense bytes from the iSBX 217B and put into        *
+ *       local area and call _puberr to interpret error                 *
+ *      Note that standard programs may not look at the sense bytes     *
+ *       directly, but must look at these standard registers.  This     *
+ *       makes the driver format portable.                              *
+ *----------------------------------------------------------------------*
+ *      Arguments:      tapiov - the tape drive in question             *
+ *                      Always uses last sense byte results             *
+ *----------------------------------------------------------------------*
+ *      Returns:        VOIDs don't return anything                     *
+ *                      Public status and error registers have result   *
+ *----------------------------------------------------------------------*/
+
+VOID _getsts(tapiov)
+TAPE *tapiov;
+{
+
+        register BYTE loop;
+
+        TRACER("_getsts");
+
+        if (_obf_pause("_getsts()","A",tapiov)) RETURN_VOID;/* Wait for OBF */
+
+        _senbyt[0]=in(tapiov->_drv_st);         /* Retreive count */
+
+        for (loop=1;loop<=_senbyt[0];loop++) {
+                _senbyt[loop]=in(tapiov->_drv_st);      /* Retreive stats */
+        }
+
+        _puberr(tapiov);
+
+        if (taperr!=0&&!_startp) {
+                _errtap(tapiov->_drive_u);
+                _unwind=TRUE;
+        }
+
+        RETURN_VOID;
+}
+/*----------------------------------------------------------------------*
+ *      Function: VOID _rests(tapiov) - retry status read               *
+ *----------------------------------------------------------------------*
+ *      Used to get a new copy of the drive status in case they came    *
+ *      back bogus due to some error/sync problem.                      *
+ *----------------------------------------------------------------------*
+ *      Arguments:      TAPE *tapiov - tape drive information           *
+ *----------------------------------------------------------------------*/
+
+VOID _rests(tapiov)
+TAPE *tapiov;
+{
+
+        TRACER("_rests");
+
+        _tapact(tapiov,CM_STAT);
+                                        /* Could get hopelessly recursive,
+                                           but if that happens we are pretty
+                                           sure the tape controller is messed
+                                           up anyway */
+        RETURN_VOID;
+
+}
+/*----------------------------------------------------------------------*
+ *      Function: VOID _out_buf(tapiov,bufad) - Write 3m with retries   *
+ *----------------------------------------------------------------------*
+ *      Internal Subroutine - Only for use locally within driver        *
+ *----------------------------------------------------------------------*
+ *      Advance tape, use _wrt_buf to put a block to tape, and if       *
+ *      an error is detected, perform the following retry:  retry       *
+ *      the output operation tapret times.  If all fail, alloc a        *
+ *      buffer full of 1's and write them out.  Then, re-advance and    *
+ *      do it again, move forward until block can be written.           *
+ *----------------------------------------------------------------------*
+ *      Arguments:      tapiov - structure of tape IOV data             *
+ *----------------------------------------------------------------------*/
+
+VOID _out_buf(tapiov,bufad)
+TAPE *tapiov;
+BYTE *bufad;
+{
+
+        BYTE *dumbf;
+        WORD retlop;
+        BOOL tempan;
+
+        TRACER("_out_buf");
+
+        FOREVER {
+
+                _adv_tape(tapiov);              /* Logical advance tape 1 */
+
+                for (retlop=RETRY_Q+1; retlop>0; retlop--) {  /* Try/retry */
+                        _unwind=FALSE;
+                        tempan=_iobuf(tapiov,bufad,IO_WRITE);
+                        if (tapsts&ST_WTP) {
+                                taperr=0;
+                                RETURN_VOID; /* Drive write protect */
+                        }
+                        if (taperr&ER_HDE) continue;
+                        if (!tempan||_unwind) taperr|=ER_HWE;
+                        if (taperr!=0) RETURN_VOID;/* Drive problem */
+                        _verify(tapiov);
+                        if (taperr&ER_HDE) continue;
+                        if (_unwind) taperr|=ER_HWE;
+                        if (taperr!=0) RETURN_VOID;/* Drive problem */
+                        if (taperr==0) {
+                                tapiov->_recnt++;
+                                RETURN_VOID;/* Success */
+                        }
+                }
+
+#ifdef DISBADS
+                p_warn("Bad tape block detected on track ");
+                p_numout(tapiov->_track,16);
+                p_disp("H block ");
+                p_numout(tapiov->_block,16);
+                p_disp("H");
+                if (RETRY_Q>1) {
+                        p_disp(" (retried ");
+                        p_numout(RETRY_Q,10);
+                        p_disp(" times)");
+                }
+                p_crlf();
+
+#endif
+
+                tapiov->_wrter++;
+                dumbf=_tmp3mb;
+                for (retlop=0; retlop<BSZ_3M; retlop++) 
+                        dumbf[retlop]=0xFF;     /* Set to all 1's */
+                _iobuf(tapiov,dumbf,IO_WRITE);
+
+                if (tapsts&ST_EOT) {
+p_warn("Excessive bad blocks at end of tape - last block could be lost\n\r");
+                        RETURN_VOID;
+                }
+
+        }
+        RETURN_VOID;
+}
+\end{verbatim}
+\begin{verbatim}
+/*----------------------------------------------------------------------*
+ *      Function: VOID _puberr(tapiov) - Interpret public status/error  *
+ *----------------------------------------------------------------------*
+ *      Internal Subroutine - Only for use locally within driver        *
+ *----------------------------------------------------------------------*
+ *      Interpret the sense bytes from the iSBX 217B and put into       *
+ *      Note that standard programs may not look at the sense bytes     *
+ *       directly, but must look at these standard registers.  This     *
+ *       makes the driver format portable.                              *
+ *----------------------------------------------------------------------*
+ *      Arguments:      tapiov - structure of tape IOV data             *
+ *                      Always uses last sense results                  *
+ *----------------------------------------------------------------------*
+ *      Returns:        VOIDs don't return anything                     *
+ *                      Public status and error registers have result   *
+ *----------------------------------------------------------------------*/
+
+VOID _puberr(tapiov)
+TAPE *tapiov;
+{
+
+        TRACER("_puberr");
+
+        tapsts=taperr=0;
+
+        if (_senbyt[0]==5&&_senbyt[1]==5&&_senbyt[2]==5&&
+            _senbyt[3]==5&&_senbyt[4]==5&&_senbyt[5]==5) {
+                _rests(tapiov);
+        }               /* A totally strange and undocumented feature */
+
+        if (_senbyt[0]>=1) {
+                if (_senbyt[1]&E1_CHKSM)taperr|=ER_HWE;  /* Checksum error */
+                if (_senbyt[1]&E1_DNR)  taperr|=ER_DNR;  /* Drive not ready */
+                if (_senbyt[1]&E1_HDE)  taperr|=ER_HDE;  /* Hard data error */
+                if (_senbyt[1]&E1_FAULT)taperr|=ER_HWE;  /* Drive Fault */
+                if (_senbyt[1]&E1_WRPT) tapsts|=ST_WTP;  /* Write protected */
+                if (_senbyt[1]&E1_CNP)  taperr|=ER_NCP;  /* No cartridge */
+        }
+
+        if (_senbyt[0]>=2) {
+                if (_senbyt[2]&E2_BNF)  taperr|=ER_HDE;  /* Block not found */
+                if (_senbyt[2]&E2_TLE)  taperr|=ER_HDE;  /* Transfer length */
+                if (_senbyt[2]&E2_CMDE) taperr|=ER_HWE;  /* Command error */
+                if (_senbyt[2]&E2_IFUN) taperr|=ER_HWE;  /* Function error */
+                if (_senbyt[2]&E2_BOT)  tapsts|=ST_BOT;  /* Beginning tape */
+        }
+
+        if (_senbyt[0]>=3) {
+                if (_senbyt[3]&E3_FMK)   taperr|=ER_HDE;  /* Mark detected */
+                if (_senbyt[3]&E3_EOT)   tapsts|=ST_EOT;  /* Hard EOT */
+        }
+
+        if (tapiov->_track>=LOW_TRK) tapsts|=ST_AET;    /* Approaching end */
+        if ((tapiov->_mblock-tapiov->_block)<=EOT_LOW
+                &&tapiov->_track==tapiov->_mtrack) 
+                    tapsts|=ST_EDT;                     /* Auto end found */
+
+        if (tapiov->_block>=tapiov->_mblock&&
+                tapiov->_track>=tapiov->_mtrack) tapsts|=ST_EOT;
+
+        RETURN_VOID;
+
+}
+/*----------------------------------------------------------------------*
+ *      Function: VOID _tapact(tapiov,comand) - execute simple command  *
+ *----------------------------------------------------------------------*
+ *      Internal Subroutine - Only for use locally within driver        *
+ *----------------------------------------------------------------------*
+ *      Perform one of the one parameter simple 3M tape drive commands  *
+ *       on the iSBX 217B.  Read in the sense bytes, and set the        *
+ *       portable error words                                           *
+ *----------------------------------------------------------------------*
+ *      Arguments:      tapiov - standard IOV for tape                  *
+ *                      comand - the single param command to execute    *
+ *----------------------------------------------------------------------*
+ *      Returns:        VOIDs don't return anything                     *
+ *                      Public status and error registers have result   *
+ *----------------------------------------------------------------------*/
+
+VOID _tapact(tapiov,comand)
+TAPE *tapiov;
+BYTE comand;
+{
+
+        register BYTE upi_reg;
+
+        TRACER("_tapact");
+
+        upi_reg=tapiov->_upi_sp;
+
+/*------Build parameter byte (see 3-20 of iSBX 217B manual)-------------*/
+
+        _parbyt[0]=((tapiov->_drive_u)&0x3)|(2<<2);
+
+/*------Assure that the iSBX 217B is waiting for us---------------------*/
+
+        if (_ibf_pause("_tapact()","A",tapiov)) RETURN_VOID;
+        if (_unwind) RETURN_VOID;       /* [018] Get out */
+
+/*------Stuff the command and the parameter byte out to iSBX 217B-------*/
+
+        out(tapiov->_upi_sp,comand);    /* Out the command to the UPI port */
+
+/*------Assure that the iSBX 217B is waiting for us---------------------*/
+
+        if (_ibf_pause("_tapact()","B",tapiov)) RETURN_VOID;
+        if (_unwind) RETURN_VOID;       /* [018] Get out */
+
+        out(tapiov->_drv_st,_parbyt[0]); /* Out parameter byte to port */
+
+/*------Retreive the sense bytes (must wait for OBF to be equal to 1)---*/
+
+        _getsts(tapiov);
+        RETURN_VOID;
+}
+/*----------------------------------------------------------------------*
+ *      Function: VOID _errtap(drive) - display sense bits on console   *
+ *----------------------------------------------------------------------*
+ *      Internal Subroutine - Only for use locally within driver        *
+ *----------------------------------------------------------------------*
+ *      Display the sense bits on the console as part of an error       *
+ *       diagnositic display.                                           *
+ *----------------------------------------------------------------------*
+ *      Arguments:      Drive - drive in question during communication  *
+ *----------------------------------------------------------------------*/
+
+_errtap(drive)
+BYTE drive;
+{
+
+        INT16 i,j;
+        WORD tmperr,tmpsts;
+
+        TRACER("_errtap");
+
+        tmperr=taperr;
+        tmpsts=tapsts;
+
+        if (_hold_er==TRUE) RETURN_VOID;        /* [007] Don't give errors */
+        if (taperr==0) RETURN_VOID;             /* No unnessary noise */
+        if (_unwind) RETURN_VOID;
+
+#ifdef DIAGERR
+
+        p_warn("iSBX 217B/HCD-75 Error Drive: ");
+        p_numout(drive,10);
+        p_disp(" - Sense ");
+        
+        if (_senbyt[0]>5) _senbyt[0]=5;
+        for (i=1; i<=_senbyt[0]; i++) {
+                if (i!=1) _p_char('/');
+                j=0|(_senbyt[i]&0xFF);
+                p_numout(j,16);
+        }
+        
+        p_cont();
+        p_disp("Decoded Sense: ");
+        if (_senbyt[1]&E1_CHKSM) p_disp("(?217B Bad Checksum) ");
+        if (_senbyt[1]&E1_DNR) p_disp("(%Drive Not Ready or Inited) ");
+        if (_senbyt[1]&E1_HDE) p_disp("(?Hard R/W error) ");
+        if (_senbyt[1]&E1_FAULT) p_disp("(?Drive Fault) ");
+        if (_senbyt[1]&E1_WRPT) p_disp("(%Write Protected) ");
+        if (_senbyt[1]&E1_CNP) p_disp("(%No Cartridge) ");
+
+        if (_senbyt[2]&E2_BNF) p_disp("(?Block Not Found) ");
+        if (_senbyt[2]&E2_TLE) p_disp("(?Transfer Length) ");
+        if (_senbyt[2]&E2_CMDE) p_disp("(?Command Error) ");
+        if (_senbyt[2]&E2_IFUN) p_disp("(?Invalid Function) ");
+        if (_senbyt[2]&E2_BOT) p_disp("(Beginning of Tape) ");
+
+        if (_senbyt[3]&E3_FMK) p_disp("(?File Mark) ");
+        if (_senbyt[3]&E3_EOT) p_disp("(End of Tape) ");
+        
+        if (_senbyt[0]>3) {
+                i=_senbyt[3]&E3_TMSK;
+                p_disp("Track: ");
+                p_numout(i,10);
+                i=(_senbyt[5]&E5_BMSK)<<8;
+                i|=_senbyt[4];
+                p_disp(" Block: ");
+                p_numout(i,10);
+        }
+
+#ifdef TRACE
+        p_cont();
+        _bak_trace();
+#endif
+        p_crlf();
+
+/*      _tapact(drviov+drive,CM_INIT);  */
+                        /* Reset system, quiet it down */
+                        /* Let's not do this for a while until we figure
+                                out if it is good for anything */
+#endif
+
+        taperr=tmperr;
+        tapsts=tmpsts;
+        RETURN_VOID;    
+
+}
+/*----------------------------------------------------------------------*
+ *      Function: BOOL _iobuf(tapiov,buffer,iot) - execute command      *
+ *----------------------------------------------------------------------*
+ *      Internal Subroutine - Only for use locally within driver        *
+ *----------------------------------------------------------------------*
+ *      Perform an I/O operation.  Dump buffer out to _block,           *
+ *      and _track.  If any errors occur, do a _puberr and exit         *
+ *----------------------------------------------------------------------*
+ *      Arguments:      tapiov - standard IOV for tape                  *
+ *                      buffer - pointer to the out buffer, must be     *
+ *                       exactly BSX_3M bytes long                      *
+ *                      iot - one of IO_READ or IO_WRITE                *
+ *----------------------------------------------------------------------*
+ *      Returns:        VOIDs don't return anything                     *
+ *                      Public status and error registers have result   *
+ *----------------------------------------------------------------------*/
+
+BOOL _iobuf(tapiov,buffer,iot)
+TAPE *tapiov;
+BYTE *buffer;
+WORD iot;
+{
+
+        BYTE upi_reg;
+        register BYTE temp,temp2;
+        register WORD loop;
+        WORD blen;
+
+        TRACER("_iobuf");
+
+        upi_reg=tapiov->_upi_sp;
+
+/*------Build parameter bytes (see 3-20&3-23 of iSBX 217B manual)-------*/
+
+        _parbyt[0]=((tapiov->_drive_u)&0x3)|(2<<2);/* Tell what unit */
+        _parbyt[0]|=2<<4;                       /* Two more params */
+        _parbyt[1]=(tapiov->_block)&0xFF;       /* Low order block # */
+        _parbyt[2]=((tapiov->_block)>>8)&0xF;   /* High order block # */
+        _parbyt[2]|=((tapiov->_track)&0xF)<<4;  /* Track */
+
+/*------Assure that the iSBX 217B is waiting for us---------------------*/
+
+        if (_ibf_pause("_iobuf()","A",tapiov)) RETURN(FALSE);
+        if (_unwind) RETURN(FALSE);             /* [018] Unwind on error */
+
+/*------Stuff the write command and the parameter bytes out to iSBX 217B*/
+
+        if (iot==IO_WRITE)      out(tapiov->_upi_sp,CM_WRITE); 
+        else                    out(tapiov->_upi_sp,CM_READ);
+                        /* Out the command to the UPI port */
+
+/*------Assure that the iSBX 217B is waiting for us---------------------*/
+
+
+        for (loop=0; loop<3; loop++) {  /* Out parameters to param port */
+                if (_ibf_pause("_iobuf()","B",tapiov)) RETURN(FALSE);
+                if (_unwind) RETURN(FALSE);     /* [018] Unwind on error */
+                out(tapiov->_drv_st,_parbyt[loop]); 
+        }
+
+/*------Stuff the SOT command and the parameter byte out to iSBX 217B---*/
+
+        _parbyt[0]&=0xF;                /* Clear the high order nibble */
+
+/*------Assure that the iSBX 217B is waiting for us---------------------*/
+
+        if (_ibf_pause("_iobuf()","C",tapiov)) RETURN(FALSE);
+        if (_unwind) RETURN(FALSE);             /* [018] Unwind on error */
+
+        out(tapiov->_upi_sp,CM_SOT);    /* Out the command to the UPI port */
+
+/*------Assure that the iSBX 217B is waiting for us---------------------*/
+
+        if (_ibf_pause("_iobuf()","D",tapiov)) RETURN(FALSE);
+        if (_unwind) RETURN(FALSE);             /* [018] Unwind on error */
+
+        out(tapiov->_drv_st,_parbyt[0]); 
+                                        /* Out parameter byte to param port */
+
+/*------Insure that SOD flag is set and that OBF is not (wait for it)---*/
+
+        if (_sod_pause("_iobuf()","A",tapiov)) RETURN(FALSE);
+        if (_unwind) RETURN(FALSE);             /* [018] Unwind on error */
+
+/*----------------Transfer the buffer on out - look for errors----------*/
+
+        temp=tapiov->_datap;                    /* Speed with registers */
+        temp2=opt_lin[tapiov->_sbx_prt];        /* Where is OPT1? */
+
+        blen = BSZ_3M;
+        if (iot==IO_READ) blen=200;
+        for (loop=0; loop<blen; loop++) {
+                if (in(tapiov->_upi_sp)&UP_OBF) {
+                        _getsts(tapiov);        /* Abort if OBF */
+                        RETURN(FALSE);          /* Return now */
+                }
+                while (!(in(PPI_PRT)&temp2));   /* Wait till OPT1 */
+                if (iot==IO_WRITE)      out(temp,buffer[loop]);
+                else                    buffer[loop]=in(temp);
+                                                /* Stuff next byte */
+        }
+        if (iot==IO_READ) buffer[loop]='\0';
+
+/*------Assure that the iSBX 217B is waiting for us---------------------*/
+
+        if (_ibf_pause("_iobuf()","E",tapiov)) RETURN(FALSE);
+        if (_unwind) RETURN(FALSE);             /* [018] Unwind on error */
+
+/*------Send EOT and get sense bytes (wait for OBF to be equal to 1)----*/
+
+        out(tapiov->_upi_sp,CM_EOT);    /* Out the command to the UPI port */
+
+/*------Assure that the iSBX 217B is waiting for us---------------------*/
+
+        if (_ibf_pause("_iobuf()","F",tapiov)) RETURN(FALSE);
+        if (_unwind) RETURN(FALSE);             /* [018] Unwind on error */
+
+        out(tapiov->_drv_st,_parbyt[0]); 
+                                        /* Out parameter byte to param port */
+
+        _getsts(tapiov);                /* EOT makes iSBX send sense bytes */
+        if (_unwind) RETURN(FALSE);     /* [018] Unwind on error */
+        RETURN(TRUE);                   /* Return back to main program */
+}
+
+/*----------------------------------------------------------------------*
+ *      Function: VOID _verify(tapiov) - Perform verify on last block   *
+ *----------------------------------------------------------------------*
+ *      Internal Subroutine - Only for use locally within driver        *
+ *----------------------------------------------------------------------*
+ *      Execute the verify function in the tape drive to check the      *
+ *      last block written against the error correction info to see     *
+ *      if there were uncorrectable write errors                        *
+ *----------------------------------------------------------------------*
+ *      Arguments:      tapiov - standard IOV for tape                  *
+ *----------------------------------------------------------------------*
+ *      Returns:        VOIDs don't return anything                     *
+ *                      Public status and error registers have result   *
+ *----------------------------------------------------------------------*/
+
+VOID _verify(tapiov)
+TAPE *tapiov;
+{
+
+        BYTE upi_reg;
+        register BYTE temp,temp2;
+        register WORD loop;
+        WORD dat_ret,key_ret,fram_err;  /* Accumulated error statistics */
+
+        TRACER("_verify");
+
+        upi_reg=tapiov->_upi_sp;
+
+/*------Build parameter bytes (see 3-20&3-23 of iSBX 217B manual)-------*/
+
+        _parbyt[0]=((tapiov->_drive_u)&0x3)|(2<<2);   /* Tell what unit */
+        _parbyt[0]|=4<<4;                             /* Four more params */
+        _parbyt[1]=(tapiov->_block)&0xFF;             /* Low order block # */
+        _parbyt[2]=((tapiov->_block)>>8)&0xF;         /* High order block # */
+        _parbyt[2]|=((tapiov->_track)&0xF)<<4;        /* Track */
+
+/*------Assure that the iSBX 217B is waiting for us---------------------*/
+
+        if (_ibf_pause("_verify()","A",tapiov)) RETURN_VOID;
+        if (_unwind) RETURN_VOID;               /* [018] Unwind on error */
+
+/*------Stuff the write command and the parameter bytes out to iSBX 217B*/
+
+        out(tapiov->_upi_sp,CM_VERI); /* Out the command to the UPI port */
+
+/*------Assure that the iSBX 217B is waiting for us---------------------*/
+
+        for (loop=0; loop<5; loop++) {  /* Out parameters to param port */
+                if (_ibf_pause("_verify()","B",tapiov)) RETURN_VOID;
+                if (_unwind) RETURN_VOID;       /* [018] Unwind on error */
+                out(tapiov->_drv_st,_parbyt[loop<3?loop:loop-2]); 
+        }
+
+        _getsts(tapiov);                /* EOT makes iSBX send sense bytes */
+
+#ifdef ADVTAPF
+#ifdef ERRSTAT
+        dat_ret=_rdram(tapiov,0x232c);
+        key_ret=_rdram(tapiov,0x232e);
+        fram_err=_rdram(tapiov,0x232b);
+        tapiov->_datcom+=dat_ret;
+        tapiov->_keycom+=key_ret;
+        tapiov->_framer+=fram_err;
+        if (dat_ret!=0) {
+                p_warn("\007");
+                if (dat_ret>1) {
+                        p_numout(dat_ret,10);
+                        p_disp(" ");
+                }
+                p_disp("Recoverable data error");
+                if (dat_ret>1) p_disp("s");
+                p_disp(" detected on track ");
+                p_numout(tapiov->_track,16);
+                p_disp("H block ");
+                p_numout(tapiov->_block,16);
+                p_disp("H");
+                p_crlf();
+        }
+        if (key_ret!=0) {
+                p_warn("\007");
+                if (key_ret>1) {
+                        p_numout(key_ret,10);
+                        p_disp(" ");
+                }
+                p_disp("Recoverable key error");
+                if (key_ret>1) p_disp("s");
+                p_disp(" detected on track ");
+                p_numout(tapiov->_track,16);
+                p_disp("H block ");
+                p_numout(tapiov->_block,16);
+                p_disp("H");
+                p_crlf();
+        }
+#endif
+#endif
+
+        RETURN_VOID;                    /* Return back to main program */
+}
+/************************************************************************/
+
+\end{verbatim}
+\begin{verbatim}
+#ifdef ADVTAPF
+/*----------------------------------------------------------------------*
+ *      Function: WORD _rdram(tapiov,addrs) - Read in one memory loc    *
+ *----------------------------------------------------------------------*
+ *      Internal Subroutine - Only for use locally within driver        *
+ *----------------------------------------------------------------------*
+ *      Read in a given HCD-75 internal ram register and return         *
+ *----------------------------------------------------------------------*
+ *      WARNING: This routine currently has a bug which causes the      *
+ *              system to place the EOT Marks in an odd place on the    *
+ *              first track when the tape is terminated.  Please        *
+ *              fix this before using in production.                    *
+ *----------------------------------------------------------------------*
+ *      Arguments:      tapiov - standard IOV for tape                  *
+ *                      addrs - address in HCD-75 to read in            *
+ *----------------------------------------------------------------------*
+ *      Returns:        Returns contents of memory location             *
+ *                      Public status and error registers have result   *
+ *----------------------------------------------------------------------*/
+
+WORD _rdram(tapiov,addrs)
+TAPE *tapiov;
+WORD addrs;
+{
+
+        BYTE upi_reg;
+        register BYTE temp,temp2;
+        register WORD loop;
+        BYTE inbuf[2];
+
+        TRACER("_rdram");
+
+        upi_reg=tapiov->_upi_sp;
+
+/*------Build parameter bytes (see 3-20&3-27 of iSBX 217B manual)-------*/
+
+        _parbyt[0]=((tapiov->_drive_u)&0x3)|(2<<2);     /* Tell what unit */
+        _parbyt[0]|=4<<4;                               /* Four more params */
+        _parbyt[1]=addrs&0xFF;                          /* Low order 8 bits */
+        _parbyt[2]=(addrs>>8)&0xFF;                     /* High ord 8 bits */
+        _parbyt[3]=_parbyt[1];                          /* End same as beg */
+        _parbyt[4]=_parbyt[2];
+
+/*------Assure that the iSBX 217B is waiting for us---------------------*/
+
+        if (_ibf_pause("_rdram()","A",tapiov)) RETURN_VOID;
+        if (_unwind) RETURN_VOID;               /* [018] Unwind on error */
+
+/*------Stuff the write command and the parameter bytes out to iSBX 217B*/
+
+        out(tapiov->_upi_sp,CM_RRAM); /* Out the command to the UPI port */
+
+/*------Assure that the iSBX 217B is waiting for us---------------------*/
+
+        for (loop=0; loop<5; loop++) {  /* Out parameters to param port */
+                if (_ibf_pause("_rdram()","B",tapiov)) RETURN_VOID;
+                if (_unwind) RETURN_VOID;       /* [018] Unwind on error */
+                out(tapiov->_drv_st,_parbyt[loop]); 
+        }
+  
+/*------Assure that the iSBX 217B is waiting for us---------------------*/
+
+
+        _parbyt[0]&=0xF;                /* Mask high order nibble */
+
+        if (_ibf_pause("_rdram()","C",tapiov)) RETURN_VOID;
+        if (_unwind) RETURN_VOID;               /* [018] Unwind on error */
+        out(tapiov->_upi_sp,CM_SOT);    /* Out the command to the UPI port */
+
+/*------Assure that the iSBX 217B is waiting for us---------------------*/
+
+        if (_ibf_pause("_rdram()","D",tapiov))  RETURN_VOID;
+        if (_unwind) RETURN_VOID;               /* [018] Unwind on error */
+        out(tapiov->_drv_st,_parbyt[0]); 
+                                        /* Out parameter byte to param port */
+
+/*------Insure that SOD flag is set and that OBF is not (wait for it)---*/
+
+        temp=tapiov->_upi_sp;
+        if (_sod_pause("_rdram()","A",tapiov)) RETURN_VOID;
+        if (_unwind) RETURN_VOID;               /* [018] Unwind on error */
+
+/*----------------Transfer the buffer on in - look for errors----------*/
+
+        temp=tapiov->_datap;                    /* Speed with registers */
+        temp2=opt_lin[tapiov->_sbx_prt];        /* Where is OPT1? */
+
+        for (loop=0; loop<2; loop++) {
+                if (in(tapiov->_upi_sp)&UP_OBF) {
+                        _getsts(tapiov);        /* Abort if OBF */
+                        _unwind=TRUE;
+                        RETURN_VOID;
+                }
+                while (!(in(PPI_PRT)&temp2));   /* Wait till OPT1 */
+                inbuf[loop]=in(temp);           /* Get next byte */
+        }
+
+/*------Assure that the iSBX 217B is waiting for us---------------------*/
+
+        if (_ibf_pause("_rdram()","E",tapiov)) RETURN_VOID;
+        if (_unwind) RETURN_VOID;               /* [018] Unwind on error */
+        
+/*------Send EOT and get sense bytes (wait for OBF to be equal to 1)----*/
+
+        out(tapiov->_upi_sp,CM_EOT);    /* Out the command to the UPI port */
+
+/*------Assure that the iSBX 217B is waiting for us---------------------*/
+
+        if (_ibf_pause("_rdram()","F",tapiov)) RETURN_VOID;
+        if (_unwind) RETURN_VOID;               /* [018] Unwind on error */
+
+        out(tapiov->_drv_st,_parbyt[0]); 
+                                        /* Out parameter byte to param port */
+
+        _getsts(tapiov);                /* EOT makes iSBX send sense bytes */
+        if (_unwind) RETURN_VOID;               /* [018] Unwind on error */
+
+/*------Load up the output data----------------------------------------*/
+
+        RETURN(inbuf[0]|(inbuf[1]<<8)); /* Return interesting data */
+}
+/*----------------------------------------------------------------------*
+ *      Function: WORD _wrtram(tapiov,addrs) - Read in one memory loc   *
+ *----------------------------------------------------------------------*
+ *      Internal Subroutine - Only for use locally within driver        *
+ *----------------------------------------------------------------------*
+ *      Read in a given HCD-75 internal ram register and return         *
+ *----------------------------------------------------------------------*
+ *      Arguments:      tapiov - standard IOV for tape                  *
+ *                      addrs - address in HCD-75 to read in            *
+ *----------------------------------------------------------------------*
+ *      Returns:        Returns contents of memory location             *
+ *                      Public status and error registers have result   *
+ *----------------------------------------------------------------------*/
+
+VOID _wrtram(tapiov,addrs,wrtdat)
+TAPE *tapiov;
+WORD addrs,wrtdat;
+{
+
+        BYTE upi_reg;
+        register BYTE temp,temp2;
+        register WORD loop;
+        BYTE inbuf[2];
+
+        TRACER("_wrtram");
+
+        RETURN_VOID;
+
+        inbuf[0] = wrtdat & 0xFF;
+        inbuf[1] = (wrtdat>>8) *0xFF;
+
+        upi_reg=tapiov->_upi_sp;
+
+/*------Build parameter bytes (see 3-20&3-27 of iSBX 217B manual)-------*/
+
+        _parbyt[0]=((tapiov->_drive_u)&0x3)|(2<<2);     /* Tell what unit */
+        _parbyt[0]|=4<<4;                               /* Four more params */
+        _parbyt[1]=addrs&0xFF;                          /* Low order 8 bits */
+        _parbyt[2]=(addrs>>8)&0xFF;                     /* High ord 8 bits */
+        _parbyt[3]=_parbyt[1];                          /* End same as beg */
+        _parbyt[4]=_parbyt[2];
+
+/*------Assure that the iSBX 217B is waiting for us---------------------*/
+
+        if (_ibf_pause("_wrtram()","A",tapiov)) RETURN_VOID;
+        if (_unwind) RETURN_VOID;               /* [018] Unwind on error */
+
+/*------Stuff the write command and the parameter bytes out to iSBX 217B*/
+
+        out(tapiov->_upi_sp,CM_WRAM); /* Out the command to the UPI port */
+
+/*------Assure that the iSBX 217B is waiting for us---------------------*/
+
+        for (loop=0; loop<5; loop++) {  /* Out parameters to param port */
+                if (_ibf_pause("_wrtram()","B",tapiov)) RETURN_VOID;
+                if (_unwind) RETURN_VOID;       /* [018] Unwind on error */
+                out(tapiov->_drv_st,_parbyt[loop]); 
+        }
+  
+/*------Assure that the iSBX 217B is waiting for us---------------------*/
+
+        if (_ibf_pause("_wrtram()","C",tapiov)) RETURN_VOID;
+        if (_unwind) RETURN_VOID;               /* [018] Unwind on error */
+
+        _parbyt[0]&=0xF;                /* Mask high order nibble */
+        out(tapiov->_upi_sp,CM_SOT);    /* Out the command to the UPI port */
+
+/*------Assure that the iSBX 217B is waiting for us---------------------*/
+
+        if (_ibf_pause("_wrtram()","D",tapiov)) RETURN_VOID;
+        if (_unwind) RETURN_VOID;               /* [018] Unwind on error */
+
+        out(tapiov->_drv_st,_parbyt[0]); 
+                                        /* Out parameter byte to param port */
+
+/*------Insure that SOD flag is set and that OBF is not (wait for it)---*/
+
+        temp=tapiov->_upi_sp;
+        if (_sod_pause("_wrtram()","A",tapiov)) RETURN_VOID;
+        if (_unwind) RETURN_VOID;               /* [018] Unwind on error */
+
+/*----------------Transfer the buffer on in - look for errors----------*/
+
+        temp=tapiov->_datap;                    /* Speed with registers */
+        temp2=opt_lin[tapiov->_sbx_prt];        /* Where is OPT1? */
+
+        for (loop=0; loop<2; loop++) {
+                if (in(tapiov->_upi_sp)&UP_OBF) {
+                        _getsts(tapiov);        /* Abort if OBF */
+                        _unwind=TRUE;
+                        RETURN_VOID;
+                }
+                while (!(in(PPI_PRT)&temp2));   /* Wait till OPT1 */
+                out(temp,inbuf[loop]);          /* Stuff next byte */
+        }
+
+/*------Assure that the iSBX 217B is waiting for us---------------------*/
+
+        if (_ibf_pause("_wrtram()","E",tapiov)) RETURN_VOID;
+        if (_unwind) RETURN_VOID;               /* [018] Unwind on error */
+
+/*------Send EOT and get sense bytes (wait for OBF to be equal to 1)----*/
+
+        out(tapiov->_upi_sp,CM_EOT);    /* Out the command to the UPI port */
+
+/*------Assure that the iSBX 217B is waiting for us---------------------*/
+
+        if (_ibf_pause("_wrtram()","F",tapiov)) RETURN_VOID;
+        if (_unwind) RETURN_VOID;               /* [018] Unwind on error */
+
+        out(tapiov->_drv_st,_parbyt[0]); 
+                                        /* Out parameter byte to param port */
+
+        _getsts(tapiov);                /* EOT makes iSBX send sense bytes */
+
+        RETURN_VOID;
+}
+#endif
+\end{verbatim}

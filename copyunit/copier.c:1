@@ -1,0 +1,1674 @@
+/*----------------------------------------------------------------------*
+ *  C h i n a   D i g i t a l   S e i s m o g r a p h   N e t w o r k	*
+ *									*
+ *	3MTEST.C - A program designed to test the CDSN3M driver 	*
+ *	subsystem.  Writes test tape with a data pattern in it		*
+ *----------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------*
+ *	This software was written by Scott Halbert			*
+ *----------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------*
+ *	Modification and history of CDSN86.C				*
+ *									*
+ *-----Edit---Date----Who-------Description of changes------------------*
+ *	001 13-Jun-85 SH	Beginning of Coding/New Template	*
+ *	002 20-Aug-85 SH	Recode to use new name standards	*
+ *	003  8-Sep-86 SH	Now main section of copier utility	*
+ *	004  9-Oct-86 SH	Get cleaned up - cartridge copier ready	*
+ *	005 10-Nov-86 SH	Ready to test first cartridge to tape	*
+ *	006  9-Dec-86 SH	Clean up more final version		*
+ *	007 15-Dec-86 SH	Final clean up for China version	*
+ *	008 16-Dec-86 SH	Don't Unload automatically, that is why	*
+ *				 we added the unload command to the menu*
+ *----------------------------------------------------------------------*/
+
+#include "src:csstnd.h"
+#include "src:cs3mio.h"
+#include "src:cs3mcf.h"
+#include "src:mtstat.h"
+
+#include "today.tmp"
+
+BYTE *tstbuf = 0x3800;		/* Define the test data buffer */
+WORD *tstwrd = 0x3800;		/* Define the word data buffer */
+#define BUF_BLKS 50
+WORD drvsts[BUF_BLKS+1]={0};	/* Drive status */
+WORD hdrsts[BUF_BLKS+1]={0};	/* Header status */
+BYTE badsts[BUF_BLKS+1]={0};
+
+#define MAXTIM 20
+struct r_time startarr[MAXTIM]={0},endarr[MAXTIM]={0};
+int curarr=0;
+BOOL flopover=FALSE;
+
+#define HDR_DEL   1
+#define HDR_GOOD  2
+#define HDR_BAD	  3
+
+#define BAD_BCD	1
+#define BAD_TIM 2
+#define BAD_STA 4
+#define BAD_CHA 8
+
+int drive = {0};
+WORD count = {0},
+	loop = {0},
+	comp = {0},
+	unit = {0};
+TAPE *tapdrv[2] = {0};
+int holdsts=0;
+
+#define nibmsk 0xF			/* Four bit nibble mask */
+#define lefnib(y,c)	((y[c-1]>>4)&nibmsk) /* Get the left nibble */
+#define rignib(y,c)	(y[c-1]&nibmsk)	/* Right half nibble */
+
+#define staid2(x)	lefnib(x,1)	/* 100's of station id */
+#define staid1(x)	rignib(x,1)	/* 10's of station id */
+#define staid0(x)	lefnib(x,2)	/* 1's of station id */
+#define year1(x)	rignib(x,2)	/* 10's of year */
+#define year0(x)	lefnib(x,3)	/* 1's of year */
+#define day2(x)		rignib(x,3)	/* 100's of day */
+#define day1(x)		lefnib(x,4)	/* 10's of day */
+#define day0(x)		rignib(x,4)	/* 1's of day */
+#define hour1(x)	lefnib(x,5)	/* 10's of hours */
+#define hour0(x)	rignib(x,5)	/* 1's of hours */
+#define minut1(x)	lefnib(x,6)	/* 10's of minutes */
+#define minut0(x)	rignib(x,6)	/* 1's of minutes */
+#define secon1(x)	lefnib(x,7)	/* 10's of seconds */
+#define secon0(x)	rignib(x,7)	/* 1's of seconds */
+#define milli2(x)	lefnib(x,8)	/* 100's of milliseconds */
+#define milli1(x)	rignib(x,8)	/* 10's of milliseconds */
+#define chanl0(x)	rignib(x,9)	/* Number of channels */
+#define samr1(x)	lefnib(x,17)	/* 10's of sample rate */
+#define samr0(x)	rignib(x,17)	/* 1's of sample rate */
+#define samrt(x)	lefnib(x,18)	/* Tenths of sample rate */
+#define ampl5(x)	rignib(x,18)	/* 100,000 amplitude */
+#define ampl4(x)	lefnib(x,19)	/* 10,000 amplitude */
+#define ampl3(x)	rignib(x,19)	/* 1,000 amplitude */
+#define ampl2(x)	lefnib(x,20)	/* 100 amplitude */
+#define ampl1(x)	rignib(x,20)	/* 10 amplitude */
+
+char *parin()
+{
+
+	char *inpar;
+
+	inpar=tgets();
+
+	while (*inpar==' '&&*inpar!='\0') inpar++;
+
+	return(inpar);
+}
+
+main()
+{
+
+	char *instr;
+
+	p_disp("\n\033[8wCDSN Cartridge Duplicator/Copier V1.2\n");
+	p_disp("\033[0w[ROM ");
+	p_disp(TODAY);
+	p_disp("]\n\n");
+
+/*----------Loop forever in tape pattern----------------------------------*/
+
+	init_tape();
+	tapdrv[0]=tapdrv[1]=NULL;
+
+	FOREVER {
+
+		p_disp("\n\033[0wFunction ([C] Cart->Cart, [R] Cart->Reel, [D] Dump, [U] Unload)? ");
+
+		instr=parin();
+
+		switch (*instr) {
+		case '?':
+			helpme();
+			break;
+		case 'C':
+			carfun();
+			break;
+		case 'R':
+			reelfun();
+			break;
+		case 'D':
+			dumpfun();
+			break;
+		case 'U':
+			unlfun();
+			break;
+		default:
+			funusage();
+		}
+
+
+	}
+
+}
+
+BOOL qask(ques,def)
+int ques,def;
+{
+	
+	char *charbuf;
+
+	FOREVER {
+
+		p_disp(ques);
+		p_disp(" <");
+		p_disp(def?"Yes>? ":"No>? ");
+
+		charbuf=parin();
+
+		if (*charbuf=='\0') return(def);
+
+		if (*charbuf=='Y') return(TRUE);
+		if (*charbuf=='N') return(FALSE);
+
+		p_disp("?Please enter a 'Y' for yes and a 'N' for no\n");
+	}
+}
+
+WORD posget()
+{
+
+	INT32 innum;
+	WORD answer;
+	char delim,*inbuf;
+
+	FOREVER {
+		inbuf=parin();
+	
+		if (*inbuf=='\0') return(-1);
+	
+		inbuf=parnum(inbuf,&innum,&delim);
+	
+		if (innum&(~0XFFFF)||innum<0) {
+			p_disp("Number must be from 0 to 65535 - re-enter\n");
+			continue;
+		}
+		answer=innum;
+		return(answer);
+	}
+}
+
+carfun()
+{
+
+	BOOL varflg,editfn;
+	WORD ctr,i,t,dif;
+	BOOL finEOF,anyerrs;
+	DWORD card,cdif;
+
+	p_disp("\n  --- CDSN Cartridge to Cartridge Duplication Function\n");
+	p_disp("\n     Mount input volume on cartridge drive 0.\n");
+	p_disp("     Mount output volume on cartridge drive 1.\n\n");
+
+/*	varflg=qask("     Verify",FALSE);	 */
+	editfn=qask("     Edit",FALSE);
+
+	curarr=0;
+	flopover=FALSE;
+
+	if (editfn) editpar();
+
+	while(tapdrv[0]==NULL||tapdrv[1]==NULL) {
+
+		for (drive=0; drive<DRIVES; drive++) {
+
+			if (tapdrv[drive]!=NULL) continue;
+
+			tapdrv[drive]=tape_open(drive);
+			if (tapdrv[drive]==NULL) continue;
+	
+		}
+	}
+
+	tap_rewind(tapdrv[0]);
+	tap_rewind(tapdrv[1]);
+
+	p_disp("\n     Copy:    ");
+
+	for (card=0; card<=0xFFF0; card+=BUF_BLKS) {
+		ctr=card&0xFFFF;
+		cdif=0xFFF0-card;
+		if (cdif>BUF_BLKS) cdif=BUF_BLKS;
+		dif=cdif;	
+		if (dif<=0) continue;
+
+		for (t=ctr; t<ctr+dif; t++) {
+			if ((t&0x0FFF)==0) {
+				p_numout((t>>12)&0xF,10);
+				continue;
+			}
+			if ((t&0x7ff)==0) p_disp(".");
+		}
+
+		finEOF=FALSE;
+		red_series(tapdrv[0],tstbuf,drvsts,ctr,dif);
+
+		if (editfn) {
+			check_headers();
+			censor_headers();
+		}
+
+		for (i=0; i<dif; i++) {
+			if (drvsts[i]&BUF_EOF) {
+				finEOF=TRUE;
+				break;
+			}
+		}
+
+		if (i>0) {
+			_printm=FALSE;
+			wrt_blk(tapdrv[1],tstbuf,i<<10,i,ctr);
+		}
+
+		if (taperr!=0) break;	  /* I/O Error */
+		if (tapsts&ST_WTP) {
+			clos_tap(tapdrv[1]);
+			tapdrv[1]=NULL;
+			p_disp("\nTape drive 1 is write protected");
+			p_crlf();
+			break;
+		}
+
+		if (finEOF) break;
+
+	}
+	
+	if (tapdrv[1]!=NULL) {
+
+		tap_mark(tapdrv[1]);
+		tap_mark(tapdrv[1]);
+		tap_mark(tapdrv[1]);
+/*		clos_tap(tapdrv[1]); */
+
+	}
+/*	if (tapdrv[0]!=NULL) clos_tap(tapdrv[0]); */
+
+	p_disp("\n\n");
+
+	p_disp("     Total of ");
+	p_numout(ctr+i,10);
+	p_disp(" tape records copied.\n");
+
+	p_disp("\007\007\007");
+	p_disp("\n     Done - Remove tapes and label appropriately.\n");
+
+}
+
+WORD currec=0,maxrec=0,cartrec=0;
+
+reelfun()
+{
+
+
+	WORD dif,ctr,t,err,startr;
+	BOOL finEOF,anyerrs,verflg,editfn;
+	char volume;
+	int driv,i,cdrive;
+	DWORD card,cdif;
+
+	maxrec=14000;
+	startr=0;
+
+	p_disp("\n  --- CDSN Cartridge to 9-Track Reel Magtape Function\n");
+	p_disp("\n     Mount input cartridge volume in drive.\n\n");
+
+	cdrive=0;
+	if (!qask("     Cartridge Drive 0",TRUE)) cdrive=1;
+
+/*	verflg=qask("     Verify",FALSE);	*/
+	editfn=qask("     Edit",FALSE);
+
+	curarr=0;
+	flopover=FALSE;
+
+	if (editfn) editpar();
+
+	p_disp("     Records per reel <");
+	p_numout(maxrec,10);
+	p_disp(">? ");
+	i=posget();
+	if (i>0) maxrec=i;
+
+	currec=maxrec+1;
+
+	volume='A';
+
+	while(tapdrv[cdrive]==NULL) tapdrv[cdrive]=tape_open(cdrive);
+
+	MTattach();
+
+	tap_rewind(tapdrv[cdrive]);
+
+	driv= -1;
+	card=0;
+	while (card<=0xFFF0) {
+		ctr=card&0xFFFF;
+		cdif=0xFFF0-card+1;
+		if (cdif>BUF_BLKS) cdif=BUF_BLKS;
+		dif=cdif;	
+		if (dif<=0) break;
+	
+		if (currec>maxrec) {
+			if (driv>=0) {
+				p_disp(" Reel done.\007");
+				MTmark(driv);
+				MTmark(driv);
+				MTmark(driv);
+				MTflap(driv);
+			}
+			p_disp("\n");
+
+			driv=mdrive(volume);
+			volume++;
+			
+			currec=0;
+
+			err=MTrewind(driv);
+			if (err!=0) {
+				p_disp("rewind() failed error ");
+				p_numout(-err,10);
+				p_disp("\n");
+				return;
+			}
+			p_disp(" Copy: ");
+		}
+
+		for (t=ctr; t<ctr+dif; t++) {
+			if ((t&0x0FFF)==0) {
+				p_numout((t>>12)&0xF,10);
+				continue;
+			}
+			if ((t&0x7ff)==0) p_disp(".");
+		}
+
+		anyerrs=FALSE;
+		finEOF=FALSE;
+		cartrec=ctr;
+		red_series(tapdrv[cdrive],tstbuf+(startr<<10),drvsts+startr,
+			ctr,dif-startr);
+
+		card+=(dif-startr);
+
+		for (i=0; i<dif; i++) {
+			if (drvsts[i]&BUF_EOF) {
+				finEOF=TRUE;
+				break;
+			}
+		}
+
+		err=0;
+		startr=trxrec(driv,i);
+
+		if (err!=0) break;
+
+		if (finEOF) break;
+
+	}
+	
+	p_disp(" Reel Done.\n");
+	MTmark(driv);
+	MTmark(driv);
+	MTmark(driv);
+	MTflap(driv);
+
+/*	if (tapdrv[cdrive]!=NULL) clos_tap(tapdrv[cdrive]); */
+
+	p_disp("\007\007\007");
+
+	p_disp("\nDone - remove tapes and label appropriately.\n");
+
+}
+
+dumpfun()
+{
+
+
+	WORD dif,ctr,t,err,startr,crbeg,crend;
+	BOOL finEOF,anyerrs,rawdmp,dmpdat;
+	char volume;
+	int driv,i,cdrive,j,k,l,totdmp,limit;
+	DWORD card,cdif;
+
+	maxrec=14000;
+	currec=maxrec+1;
+	startr=0;
+
+	p_disp("\n  --- CDSN Cartridge Dump Function\n");
+	p_disp("\n     Mount input cartridge volume in drive.\n\n");
+
+	cdrive=0;
+	if (!qask("     Cartridge Drive 0",TRUE)) cdrive=1;
+
+	rawdmp=qask("     Raw Dump",FALSE);
+	limit=100;
+	dmpdat=FALSE;
+	if (rawdmp) {
+		p_disp("     Bytes to dump <");
+		totdmp=20;
+		p_numout(totdmp,10);
+		p_disp(">? ");
+		i=posget();
+		if (i>0) totdmp=i;
+		if (totdmp>1024) totdmp=1024;
+	} else	dmpdat=qask("     Dump Data",FALSE);
+
+	if (!dmpdat) limit=500;
+
+/*	load crbeg,crend */
+
+	crbeg=0;
+
+	FOREVER {
+		p_disp("     Beginning Record <");
+		p_numout(crbeg,10);
+		p_disp(">? ");
+		i=posget();
+		if (i>=0) crbeg=i;
+		crend=crbeg+10;
+
+		p_disp("        Ending Record <");
+		p_numout(crend,10);
+		p_disp(">? ");
+		i=posget();
+		if (i>=0) crend=i;
+
+		if (crbeg>crend||crend-crbeg>limit) {
+			p_disp("?End must be after begin, and you may not specify more than ");
+			p_numout(limit,10);
+			p_disp(" records\n");
+			continue;
+		}
+		break;
+	}
+
+	curarr=0;
+	flopover=FALSE;
+
+	p_crlf();
+
+	while(tapdrv[cdrive]==NULL) tapdrv[cdrive]=tape_open(cdrive);
+
+	driv= -1;
+	card=crbeg;
+	while (card<=crend) {
+		ctr=card&0xFFFF;
+		cdif=crend-card+1;
+		if (cdif>BUF_BLKS) cdif=BUF_BLKS;
+		dif=cdif;	
+		if (dif<=0) break;
+	
+		anyerrs=FALSE;
+		finEOF=FALSE;
+		cartrec=ctr;
+		red_series(tapdrv[cdrive],tstbuf+(startr<<10),drvsts+startr,
+			ctr,dif-startr);
+
+		card+=(dif-startr);
+
+		for (i=0; i<dif; i++) {
+			if (drvsts[i]&BUF_EOF) {
+				finEOF=TRUE;
+				break;
+			}
+		}
+
+		err=0;
+		if (rawdmp) {
+			for (j=0; j<i; j++) {
+				p_disp("\033[0wRecord ");
+				p_number((INT32) ctr+j,10,5,FALSE);
+				p_crlf();
+				p_disp("\033[4w");
+				for (k=0; k<1024; k+=32) {
+					p_number((INT32) k,10,4,TRUE);
+					p_disp("/ ");
+					for (l=0; l<32; l++) {
+						if(k+l>=totdmp) break;
+						p_number((INT32) 
+							(*(tstbuf+(j<<10)+k+l))&0xFF
+							,16,2,TRUE);
+						p_disp(" ");
+					}
+					p_crlf();
+					if(k+l>=totdmp) break;
+				}
+				p_crlf();
+			}
+
+		}	else	startr=dmprec(driv,i,dmpdat);
+
+		if (err!=0) break;
+
+		if (finEOF) break;
+
+	}
+	
+
+}
+
+unlfun()
+{
+
+	BOOL anyunl;
+	int cdrive,i;
+
+	anyunl=FALSE;
+	p_crlf();
+
+	p_disp("     Drive to unload <return for both>? ");
+	i=posget();
+
+	p_crlf();
+
+	for (cdrive=0; cdrive<2; cdrive++) {
+
+		if (i>=0&&i!=cdrive) continue;
+
+		tapdrv[cdrive]=tape_open(cdrive);
+		if (tapdrv[cdrive]!=NULL) {
+			p_disp("          Unloading cartridge drive ");
+			p_numout(cdrive,10);
+			p_disp(".\n");
+			clos_tap(tapdrv[cdrive]);
+			anyunl=TRUE;
+		}
+
+	}
+
+	if (!anyunl) p_disp("          No cartridges were loaded.\n");
+
+}
+
+int mdrive(ivol)
+char ivol;
+{
+
+	int odrv,err;
+
+	FOREVER {
+		p_disp("     Mount target reel ");
+		_p_char(ivol);
+		p_disp(". \007\007");
+
+		FOREVER {
+			for (odrv=0; odrv<8; odrv++) {
+				err=MTopen(odrv);
+				if (err==0) break;
+			}
+
+			if (err==0) break;
+		}
+
+		err=MTstatus(odrv);
+
+		if (err&MTS_FPT) {
+			p_disp("\n     %Tape mounted on ");
+			p_numout(odrv,10);
+			p_disp(" write protected... Please remedy.\n");
+			MTflap(odrv);
+			continue;
+		}
+
+		p_disp(" ");
+		p_numout(odrv,10);
+		p_disp(" Mounted. ");
+
+		return(odrv);
+
+	}
+
+}
+
+helpme()
+{
+
+p_disp("\nPlease enter a 1 letter command as follows:\n\n");
+p_disp("    C - To copy one 3M data cartridge to another\n");
+p_disp("    R - To copy a 3M cartridge onto 9-track Reel Magtape\n");
+p_disp("    D - Dump raw or decoded data records to the console\n");
+p_disp("    U - To unload and unlock any loaded cartridges\n");
+
+	return;
+}
+
+funusage()
+{
+p_disp("\n?Please enter a legal function code - type a '?' for help.\007\n");
+}
+
+BOOL deleted(a)
+int a;
+{
+
+	WORD b,c,off;
+	off=a<<10;
+
+	c=0;
+	for (b=0; b<200; b++) {
+		if (tstbuf[off+b]==0xFF) c++;
+		if (c>100) return(TRUE);
+	}
+	return(FALSE);
+}
+
+#define LEFT(t) ((tstbuf[(rec<<10)+t]>>4)&0xF)
+#define RIGH(t) (tstbuf[(rec<<10)+t]&0xF)
+#define DIGCHK(t) (t>9)
+
+BOOL headgood(rec)
+int rec;
+{
+
+	BOOL pre,test;
+	pre=TRUE;	
+
+/*	Are all bcd digits from 0 to 9?    */
+
+	badsts[rec]=0;
+
+	test=TRUE;
+
+	if (DIGCHK(LEFT(0))||DIGCHK(RIGH(0))) test=FALSE;
+	if (DIGCHK(LEFT(1))||DIGCHK(RIGH(1))) test=FALSE;
+	if (DIGCHK(LEFT(2))||DIGCHK(RIGH(2))) test=FALSE;
+	if (DIGCHK(LEFT(3))||DIGCHK(RIGH(3))) test=FALSE;
+	if (DIGCHK(LEFT(4))||DIGCHK(RIGH(4))) test=FALSE;
+	if (DIGCHK(LEFT(5))||DIGCHK(RIGH(5))) test=FALSE;
+	if (DIGCHK(LEFT(6))||DIGCHK(RIGH(6))) test=FALSE;
+	if (DIGCHK(LEFT(7))||DIGCHK(RIGH(7))) test=FALSE;
+	if (DIGCHK(RIGH(8))) test=FALSE;
+
+	if (DIGCHK(LEFT(16))||DIGCHK(RIGH(16))) test=FALSE;
+	if (DIGCHK(LEFT(17))) test=FALSE;
+
+	if (!test) {
+		badsts[rec]|=BAD_BCD;
+		pre=FALSE;
+	}
+
+/*	Day from 0-369, Hour from 0-59, Minute 0-59, Second 0-59    */
+
+	test=TRUE;
+
+	if (RIGH(2)>3) test=FALSE;
+	if (RIGH(2)==3&&LEFT(4)>6) test=FALSE;
+	if (LEFT(4)>5)	test=FALSE;
+	if (LEFT(5)>5)	test=FALSE;
+	if (LEFT(6)>5)	test=FALSE;
+
+	if (!test) {
+		badsts[rec]|=BAD_TIM;
+		pre=FALSE;
+	}
+
+/*      Station code from 100 to 199      */
+
+	test=TRUE;
+
+	if (LEFT(0)!=1) test=FALSE;
+
+	if (!test) {
+
+		badsts[rec]|=BAD_STA;
+		pre=FALSE;
+	}
+
+
+/*      Number of channels from 1 to 9      */
+
+	test=TRUE;
+
+	if (RIGH(8)==0) test=FALSE;
+
+	if (!test) {
+		badsts[rec]|=BAD_STA;
+		pre=FALSE;
+	}
+
+	return(pre);
+}
+
+check_headers()
+{
+
+	WORD a;
+
+	for (a=0; a<BUF_BLKS; a++) {
+
+		hdrsts[a]=0;
+
+		if (deleted(a)) {
+			hdrsts[a]=HDR_DEL;
+			continue;
+		}
+
+		hdrsts[a]=headgood(a)?HDR_GOOD:HDR_BAD;
+	}
+}
+
+censor_headers()
+{
+
+	WORD a,b;
+	BOOL flopany;
+
+	flopany=FALSE;
+
+	for (a=0; a<BUF_BLKS; a++) {
+
+		if (flopover) {
+			if (hdrsts[a]!=HDR_DEL) zerdat(&tstbuf[a<<10]);
+			flopany=TRUE;
+			flopover=FALSE;
+			continue;
+		}
+
+		if (hdrsts[a]==HDR_DEL&&flopany) {
+			deldat(&tstbuf[a<<10]);
+			continue;
+		}	/* If we've been censoring, assure that
+			   deleted data is really deleted */
+
+		if (hdrsts[a]==HDR_GOOD) {
+			for (b=0; b<curarr; b++) {
+				if (chktim(&tstbuf[a<<10],&startarr[b],
+					&endarr[b])) flopover=TRUE;
+			}
+			if (flopover) {
+				zerhed(&tstbuf[a<<10]);
+				flopany=TRUE;
+			}
+		}
+	}
+}
+		
+rcopy(source,target)
+int source,target;
+{
+
+	WORD b,offs,offt;
+	offs=source<<10;
+	offt=target<<10;
+
+	if (source==target) return;
+
+	for(b=0; b<1024; b++)	tstbuf[offt+b]=tstbuf[offs+b];
+}
+
+int nondel(next,tot)
+int next;
+{
+
+	FOREVER {
+		next++;
+		if (next>=tot) return(-1);
+		if (hdrsts[next]!=HDR_DEL) return(next);
+		dlose(next);
+	}
+}
+
+lose(x)
+int x;
+{
+	long rec;
+	p_disp("\n          Skip record ");
+	rec=x+cartrec;
+	p_lngout(rec,10);
+	p_disp(": ");
+	if (badsts[x]&BAD_BCD) _p_char('B');
+	if (badsts[x]&BAD_TIM) _p_char('T');
+	if (badsts[x]&BAD_STA) _p_char('S');
+	if (badsts[x]&BAD_CHA) _p_char('C');
+	p_disp("   ");
+}
+dlose(x)
+int x;
+{
+	long rec;
+	return;
+	p_disp("\nRecord ");
+	rec=x+cartrec;
+	p_lngout(rec,10);
+	p_disp(" deleted.\n");
+}
+
+int trxrec(driv,tot)
+int driv,tot;
+{
+
+	int left,next,fnex,a,err;
+
+	left=0;
+	
+	check_headers();
+	censor_headers();
+
+	next=nondel(-1,tot);
+
+	while (next>=0) {
+		if (hdrsts[next]==HDR_GOOD) {
+			fnex=nondel(next,tot);
+			if (fnex<0) {
+				left=next;
+				next=-1;
+				break;
+			}
+			if (fnex!=next+1) rcopy(fnex,next+1);
+
+			err=MTwrite(driv,tstbuf+(next<<10),2048);
+			if (err== -5) {
+				p_disp("\n     Tape reel full at ");
+				p_numout(currec,10);
+				p_disp(" records.  ");
+				left=next;
+				currec=maxrec+1;
+				break;
+			}
+			if (err!=0) {
+				p_disp("\nMTwrite() failed error ");
+				p_numout(-err,10);
+				p_disp("\n");
+			}
+			currec++;
+			next=nondel(fnex,tot);
+		}
+		if (hdrsts[next]==HDR_BAD) {
+			lose(next);
+			next=nondel(next,tot);
+		}
+	}
+
+	if (left==0) return(0);
+
+	for (a=0; a<tot-left; a++)	rcopy(left+a,a);
+
+	return(a);
+}
+char defcha[3]={'Z','N','E'};
+
+int dmprec(driv,tot,datdmp)
+int driv,tot;
+BOOL datdmp;
+{
+
+	int left,next,fnex,a,err;
+
+	left=0;
+	
+	check_headers();
+
+	next=nondel(-1,tot);
+
+	while (next>=0) {
+		if (hdrsts[next]==HDR_GOOD) {
+			fnex=nondel(next,tot);
+			if (fnex<0) {
+				left=next;
+				next=-1;
+				break;
+			}
+			if (fnex!=next+1) rcopy(fnex,next+1);
+
+			dispdump(cartrec+next,tstbuf+(next<<10),datdmp);
+			currec++;
+			next=nondel(fnex,tot);
+		}
+		if (hdrsts[next]==HDR_BAD) {
+			lose(next);
+			next=nondel(next,tot);
+		}
+	}
+
+	if (left==0) return(0);
+
+	for (a=0; a<tot-left; a++)	rcopy(left+a,a);
+
+	return(a);
+}
+
+dispdump(rnum,hdr,datdmp)
+WORD rnum;
+BYTE *hdr;
+BOOL datdmp;
+{
+
+	int sam,t;
+	struct r_time trytime;
+	char chid;
+	INT16 a,b,c,gf,j,chn,totind,totrnk,i;
+	INT32 lng;
+
+	p_disp("\033[0w");
+
+	p_disp("Record ");
+	p_numout(rnum&0xFFFF,10);
+	p_disp(" - ");
+
+	sam=samrt(hdr)+(samr0(hdr)*10)+(samr1(hdr)*100);
+
+	switch (sam) {
+	case 1:		p_disp("VLP (0.1 sps) ");
+			break;
+	case 10:	p_disp("LP (1.0 sps) ");
+			break;
+	case 200:	p_disp("BB (20.0 sps) ");
+			break;
+	case 400:	p_disp("SP (40.0 sps) ");
+			break;
+	default:	p_disp("Unknown Rec type (");
+			t=sam%10;
+			p_numout(sam/10,10);
+			p_disp(".");
+			_p_char(t+'0');
+			p_disp(") ");
+	}
+
+	p_numout(chanl0(hdr),10);
+	p_disp(" Channels, Station: ");
+	p_numout(staid2(hdr)*100+staid1(hdr)*10+staid0(hdr), 10);
+	p_disp(", Time: ");
+	
+	trytime.yr = year0(hdr);
+	trytime.day = (day2(hdr)*100)+(day1(hdr)*10)+day0(hdr);
+	trytime.hr = (hour1(hdr)*10)+hour0(hdr);
+	trytime.min = (minut1(hdr)*10)+minut0(hdr);
+	trytime.sec = (secon1(hdr)*10)+secon0(hdr);
+	trytime.msec = (milli2(hdr)*100)+(milli1(hdr)*10);
+	
+	prdate(&trytime);
+	p_crlf();
+
+	p_disp("   Health=");
+	p_numout(lefnib(hdr,9),16);
+	p_disp(", Config=");
+	p_numout(lefnib(hdr,10)>1,16);
+	if (hdr[9]&0x1F) {
+		p_disp(" Flags: ");
+		if (hdr[9]&0x10) p_disp("EVENT ");
+		if (hdr[9]&0x08) p_disp("B3 ");
+		if (hdr[9]&0x04) p_disp("B2 ");
+		if (hdr[9]&0x02) p_disp("BLANKED ");
+		if (hdr[9]&0x01) p_disp("CAL ");
+	}
+	p_crlf();
+	
+	if (sam==10) {
+		if (hdr[10]|hdr[11]) {
+			p_disp("   Clock Correction ");
+			if (lefnib(hdr,11)) p_disp("-");
+			else	p_disp("+");
+			_p_char(rignib(hdr,11)+'0');
+			_p_char(lefnib(hdr,12)+'0');
+			_p_char(rignib(hdr,12)+'0');
+			p_disp(" ms\n");
+		}
+	} else {
+		if ((sam==20|sam==40)&&(hdr[10]|hdr[11]|hdr[12])) {
+			p_disp("   Event pick time ");
+			_p_char(lefnib(hdr,11)+'0');
+			p_disp(":");
+			_p_char(rignib(hdr,11)+'0');
+			_p_char(lefnib(hdr,12)+'0');
+			p_disp(".");
+			_p_char(rignib(hdr,12)+'0');
+			p_disp(",  Period ");
+			_p_char(lefnib(hdr,13)+'0');
+			p_disp(".");
+			_p_char(rignib(hdr,13)+'0');
+			p_disp(",  Amplitude ");
+			_p_char(rignib(hdr,18)+'0');
+			_p_char(lefnib(hdr,19)+'0');
+			_p_char(rignib(hdr,19)+'0');
+			_p_char(lefnib(hdr,20)+'0');
+			_p_char(rignib(hdr,20)+'0');
+			p_disp("0");
+			p_crlf();
+		}
+	}
+	if (sam==10&&(hdr[18]|hdr[19])) {
+			p_disp("   Background estimate (from SP ED) ");
+			_p_char(rignib(hdr,18)+'0');
+			_p_char(lefnib(hdr,19)+'0');
+			_p_char(rignib(hdr,19)+'0');
+			_p_char(lefnib(hdr,20)+'0');
+			_p_char(rignib(hdr,20)+'0');
+			p_disp(" counts\n");
+	}
+
+	if (hdr[14]|hdr[15]) {
+		p_disp("   Calibration type ");
+		_p_char(lefnib(hdr,14)+'0');
+		p_disp(" at time ");
+		_p_char(lefnib(hdr,15)+'0');
+		_p_char(rignib(hdr,15)+'0');
+		p_disp(".");
+		_p_char(lefnib(hdr,16)+'0');
+		_p_char(rignib(hdr,16)+'0');
+		p_disp("\n");
+	}
+		
+	if (datdmp) {
+		p_disp("\033[4w\n");
+
+		chn=chanl0(hdr);
+		totind=1014/chn;
+		totrnk=totind/14;
+		if ((totind%14)!=0) totrnk++;
+		
+		for (a=0; a<totrnk; a++) {
+		 for (b=0; b<chn; b++) {
+
+		  chid=b+'A';
+		  if (chn==3) chid=defcha[b];
+		  p_disp("         ");
+		  _p_char(chid);
+
+		  for (c=0; c<14; c++) {
+
+			if ((a*14)+c>=totind) break;	/* End of last row */
+
+			i = 20+(((a*14)+c)*(chn*2))+(b*2);
+			
+			j  = (hdr[i] & 0x3F) << 8;
+			j |= (hdr[i+1] & 0xFF);
+			j -= 8191;
+
+			gf = (hdr[i] & 0xC0) >> 6;
+
+			lng = (INT32) j;
+
+			switch (gf) {
+			case 1:	lng <<= 2;
+				break;
+			case 2:	lng <<= 4;
+				break;
+			case 3:	lng <<= 7;
+			}
+
+			p_number(lng,10,8,FALSE);
+		
+		  }
+	          p_crlf();
+ 		 }
+		 if (chn>1) p_crlf();
+		}
+		p_disp("\033[0w");
+	}			
+				
+	
+}
+editpar()
+{
+
+	char *charbuf;
+	struct r_time stime,etime;
+	int t1,t2;
+
+	FOREVER {
+
+		FOREVER {
+  		  p_disp("\n          Enter starting date/time (return to exit): ");
+	
+			charbuf=parin();
+	
+			if (*charbuf=='\0') {
+				p_disp("\n");
+				return;
+			}
+
+			if (!pardate(charbuf,&startarr[curarr])) {
+				p_disp("Illegal date, re-enter\n");
+				continue;
+			}
+
+			break;
+
+		}
+
+		FOREVER {
+
+  		      p_disp("                             Enter ending date/time: ");
+
+			charbuf=parin();
+	
+			if (*charbuf=='\0') continue;
+
+			if (!pardate(charbuf,&endarr[curarr])) {
+				p_disp("          \007?Illegal date, re-enter\n");
+				continue;
+			}
+
+			break;
+
+		}
+
+		if (startarr[curarr].yr!=endarr[curarr].yr) {
+			p_disp("          \007?Dates must be in same year - re-enter\n");
+			continue;
+		}
+		if (timafter(&startarr[curarr],&endarr[curarr])) {
+			p_disp("          \007?Ending date must be after starting date - re-enter\n");
+			continue;
+		}
+
+		t1=startarr[curarr].day*24+startarr[curarr].hr;
+		t2=endarr[curarr].day*24+endarr[curarr].hr;
+		if (t1+24<t2) {
+			p_disp("          \007?Max range is 24 hours - re-enter\n");
+			continue;
+		}
+
+		p_disp("\n          Clear data from ");
+		prdate(&startarr[curarr]);
+		p_disp(" to ");
+		prdate(&endarr[curarr]);
+		if (!qask("",FALSE)) continue;
+		curarr++;
+
+	}
+}
+	
+
+prdate(otime)
+struct r_time *otime;
+{
+
+	p_number((INT32) otime->yr,10,0,FALSE);
+	p_disp(",");
+	p_number((INT32) otime->day,10,0,FALSE);
+	p_disp(",");
+	p_number((INT32) otime->hr,10,0,FALSE);
+	p_disp(":");
+	p_number((INT32) otime->min,10,2,TRUE);
+	p_disp(":");
+	p_number((INT32) otime->sec,10,2,TRUE);
+
+	return;
+}
+
+#define YRSET 0x0001
+#define DYSET 0x0002
+#define HRSET 0x0004
+#define MNSET 0x0008
+#define SCSET 0x0010
+#define MSSET 0x0020
+
+BOOL pardate(inbuf,rbuf)
+char *inbuf;
+struct r_time *rbuf;
+{
+
+	int inflg;
+	INT32 innum;
+	char delim;
+
+	rbuf->yr=0;
+	rbuf->day=0;
+	rbuf->hr=0;
+	rbuf->min=0;
+	rbuf->sec=0;
+	rbuf->msec=0;
+
+	inflg=0;
+
+	FOREVER {
+
+		inbuf=parnum(inbuf,&innum,&delim);
+
+		if (delim==','&&!(inflg&YRSET)) {
+			rbuf->yr=innum;
+			inflg|=YRSET;
+			continue;
+		}
+
+		if (delim==','&&!(inflg&DYSET)) {
+			rbuf->day=innum;
+			inflg|=DYSET;
+			if (innum>366||innum<=0) return(FALSE);
+			continue;
+		}
+
+		if (delim==':'&&!(inflg&HRSET)) {
+			rbuf->hr=innum;
+			inflg|=HRSET;
+			if (innum>23) return(FALSE);
+			continue;
+		}
+
+		if (delim=='\0'&&!(inflg&HRSET)) {
+			rbuf->hr=innum;
+			if (innum>23) return(FALSE);
+			return(TRUE);
+		}
+
+		if (delim==':'&&!(inflg&MNSET)) {
+			rbuf->min=innum;
+			inflg|=MNSET;
+			if (innum>59) return(FALSE);
+			continue;
+		}
+
+		if (delim=='\0'&&!(inflg&MNSET)) {
+			rbuf->min=innum;
+			if (innum>59) return(FALSE);
+			return(TRUE);
+		}
+
+		if (delim=='\0'&&!(inflg&SCSET)) {
+			rbuf->sec=innum;
+			if (innum>59) return(FALSE);
+			return(TRUE);
+		}
+
+		return(FALSE);
+
+	}
+}
+
+char *parnum(charptr,retval,retdel)
+INT32 *retval;
+char *charptr,*retdel;
+{
+
+	INT32 acum;
+	int   mxchr;
+	char  ich;
+
+	acum=0;
+	mxchr=0;
+
+	FOREVER {
+		ich= *(charptr++);
+	
+		if (ich==' ') continue;
+		if (ich>='0'&&ich<='9') {
+			if (mxchr++>8) continue;
+			acum*=10;
+			acum+=ich-'0';
+			continue;
+		} else {
+			*retdel=ich;
+			*retval=acum;
+			return(charptr++);
+		}
+	}
+}
+	
+BOOL chktim(hdr,stime,etime)
+struct r_time *stime,*etime;
+char *hdr;
+{
+
+	struct r_time trytime,rendtime;
+	int sam,try;
+
+	trytime.yr = year0(hdr);
+	trytime.day = (day2(hdr)*100)+(day1(hdr)*10)+day0(hdr);
+	trytime.hr = (hour1(hdr)*10)+hour0(hdr);
+	trytime.min = (minut1(hdr)*10)+minut0(hdr);
+	trytime.sec = (secon1(hdr)*10)+secon0(hdr);
+	trytime.msec = (milli2(hdr)*100)+(milli1(hdr)*10);
+	
+	sam=samrt(hdr)+(samr0(hdr)*10)+(samr1(hdr)*100);
+
+/*	p_disp("\n");
+	prdate(&trytime);
+	p_disp(" ");
+	p_numout(sam,10);
+	p_disp(" "); */
+
+	if (timafter(&trytime,stime)&&timafter(etime,&trytime)) {
+/*		p_disp("\nstart of ");
+		p_numout(sam,10);
+		p_disp(" ");
+		prdate(&trytime);
+		p_disp(" in range "); */
+		return(TRUE);
+	}
+
+	switch (sam) {
+	case 1:		try=3380;
+			break;
+	case 10:	try=338;
+			break;
+	case 200:	try=17;
+			break;
+	case 400:	try=9;
+			break;
+	}
+
+	tadd(&rendtime,&trytime,0,0,0,0,try,0);
+
+	if (timafter(&rendtime,stime)&&timafter(etime,&rendtime)) {
+/*		p_disp("\nend of ");
+		p_numout(sam,10);
+		p_disp(" ");
+		prdate(&trytime);
+		p_disp(" in range ");	*/
+		return(TRUE);
+	}
+
+	if (timafter(stime,&trytime)&&timafter(&rendtime,etime)) {
+/*		p_disp("\nmiddle of ");
+		p_numout(sam,10);
+		p_disp(" ");
+		prdate(&trytime);
+		p_disp(" in range ");	*/
+		return(TRUE);
+	}
+
+	return(FALSE);
+}
+
+#ifdef TESTTIMAFTER
+BOOL timafter(a,b)
+struct r_time *a,*b;
+{
+
+	BOOL tmp;
+
+	tmp=ttimafter(a,b);
+
+	p_disp("timafter(");
+	prdate(a);
+	p_disp(",");
+	prdate(b);
+	p_disp(") = ");
+	p_disp(tmp?"TRUE\n":"FALSE\n");
+
+	return(tmp);
+}
+#endif
+
+BOOL timafter(a,b)
+struct r_time *a,*b;
+{
+
+	int ayr,byr;
+
+	ayr=a->yr % 10;
+	byr=b->yr % 10;
+
+	if (ayr==0&&byr==9) return(TRUE);		/* Wrap condition */
+	if (byr==0&&ayr==9) return(FALSE);
+
+	if (ayr>byr) return(TRUE);
+	if (ayr<byr) return(FALSE);
+
+	if (a->day>b->day) return(TRUE);
+	if (a->day<b->day) return(FALSE);
+
+	if (a->hr>b->hr) return(TRUE);
+	if (a->hr<b->hr) return(FALSE);
+
+	if (a->min>b->min) return(TRUE);
+	if (a->min<b->min) return(FALSE);
+
+	if (a->sec>b->sec) return(TRUE);
+	if (a->sec<b->sec) return(FALSE);
+
+	return(FALSE);
+
+}
+
+tadd(otime,itime,dyear,dday,dhour,dminute,dsecond,dmsec)
+struct r_time *otime,*itime;
+INT16 dyear,dday,dhour,dminute,dsecond,dmsec;
+{
+
+	INT32	lyear,lday,lhour,lminute,lsecond,lmsec;
+
+	lyear=itime->yr+dyear;
+	lday=itime->day+dday;
+	lhour=itime->hr+dhour;
+	lminute=itime->min+dminute;
+	lsecond=itime->sec+dsecond;
+	lmsec=itime->msec+dmsec;
+
+	while (lmsec<0) {
+		lsecond--;
+		lmsec+=1000;
+	}
+
+	while (lsecond<0) {
+		lminute--;
+		lsecond+=60;
+	}
+
+	while (lminute<0) {
+		lhour--;
+		lminute+=60;
+	}
+
+	while (lhour<0) {
+		lday--;
+		lhour+=24;
+	}
+
+	if (lday<1) lday=1;
+
+	while (lmsec>999) {
+		lsecond++;
+		lmsec-=1000;
+	}
+
+	while (lsecond>59) {
+		lminute++;
+		lsecond-=60;
+	}
+
+	while (lminute>59) {
+		lhour++;
+		lminute-=60;
+	}
+
+	while (lhour>23) {
+		lday++;
+		lhour-=24;
+	}
+
+	if (lday>366) lday=366;
+
+	otime->yr=lyear;
+	otime->day=lday;
+	otime->hr=lhour;
+	otime->min=lminute;
+	otime->sec=lsecond;
+	otime->msec=lmsec;
+
+}
+
+zerhed(hdr)
+char *hdr;
+{
+
+	int t;
+
+	hdr[9] &= ~1;		/* Turn off cal bit */
+	hdr[9] |= 2;		/* Set the censored bit */
+
+	hdr[13] &= 0xF;		/* Turn off cal code */
+	hdr[14] = 0;
+	hdr[15] = 0;		/* Turn off cal time */
+
+	if (hdr[16]!=0x01) {	/* Not LP */
+		hdr[10]=0;
+		hdr[11]=0;
+		hdr[12]=0;
+	}			/* Zero pick time, but leave time corr */
+
+	hdr[17]&= 0xF;		/* Keep low sam rate, but cut amplitude */
+
+	hdr[18]=0;
+	hdr[19]=0;
+
+	for (t=20; t<1024; t++) hdr[t]=0;	/* Purge data records */
+}
+
+zerdat(hdr)
+char *hdr;
+{
+
+	int t;
+
+	for (t=0; t<1024; t++) hdr[t]=0;
+
+}
+
+deldat(hdr)
+char *hdr;
+{
+
+	int t;
+
+	for (t=0; t<1024; t++) hdr[t]=0xFF;
+
+}
+
+#ifdef VERIFYCODE
+
+WORD checksums[BUF_BLKS][4][2]={0};
+
+verifytape()
+{
+
+	WORD ctr,i,t;
+	BOOL finEOF;
+
+	while(tapdrv[0]==NULL||tapdrv[1]==NULL) {
+
+		for (drive=0; drive<DRIVES; drive++) {
+
+			if (tapdrv[drive]!=NULL) continue;
+
+			tapdrv[drive]=tape_open(drive);
+			if (tapdrv[drive]==NULL) continue;
+	
+		}
+	}
+
+	count = 0;
+	
+	p_disp("Verify contents of tapes\n");
+	p_crlf();
+
+	tap_rewind(tapdrv[0]);
+	tap_rewind(tapdrv[1]);
+
+	p_disp("Verify: ");
+
+	clrbufs();
+
+	for (ctr=0; ctr<=0xFFF0; ctr+=BUF_BLKS) {
+
+		for (t=ctr; t<ctr+BUF_BLKS; t++) {
+			if ((t&0x0FFF)==0) {
+				p_numout((t>>12)&0xF,10);
+				continue;
+			}
+			if ((t&0x3ff)==0) p_disp(".");
+		}
+
+		finEOF=FALSE;
+		red_series(tapdrv[0],tstbuf,drvsts,ctr,BUF_BLKS);
+
+		for (i=0; i<BUF_BLKS; i++) {
+			if (drvsts[i]&BUF_EOF) {
+				finEOF=TRUE;
+				break;
+			}
+		}
+
+		chkbuf(0,i);
+
+		red_series(tapdrv[1],tstbuf,drvsts,ctr,BUF_BLKS);
+
+		for (i=0; i<BUF_BLKS; i++) {
+			if (drvsts[i]&BUF_EOF) {
+				finEOF=TRUE;
+				break;
+			}
+		}
+
+		chkbuf(1,i);
+
+		reportcheck(i,ctr);
+
+		if (finEOF) break;
+
+	}
+	
+	p_disp("\n\nVerify Done\n");
+
+}
+
+
+clrbufs()
+{
+
+	WORD i,j,k;
+
+	for (k=0; k<BUF_BLKS; k++)
+		for (i=0; i<4; i++)
+			for (j=0; j<2; j++)  checksums[k][i][j]=0;
+
+}
+
+chkbuf(j,nr)
+WORD j,nr;
+{
+
+	register WORD c,i,lm;
+
+	for (c=0; c<nr; c++) {
+		lm=c*512;
+		for (i=0; i<512; i++) {
+			checksums[c][i&3][j]^=tstwrd[lm+i];
+		}
+	}
+
+}
+
+reportcheck(nr,bg)
+WORD nr,bg;
+{
+
+	WORD i,j,t;
+
+	for (i=0; i<nr; i++) {
+		for (j=0; j<4; j++) {
+
+			if (checksums[i][j][0]!=checksums[i][j][1]) {
+				p_disp("\nVerify mismatch on track ");
+				p_numout(((bg+i)>>12)&0xF,10);
+				p_disp(" block ");
+				p_numout((bg+i)&0x0FFF,10);
+/*
+				p_disp("\nLeft:   ");
+				for (t=0; t<4; t++) {
+					p_numout(checksums[i][t][0],16);
+					p_disp(" ");
+				}
+				p_disp("\nRight:  ");
+				for (t=0; t<4; t++) {
+					p_numout(checksums[i][t][1],16);
+					p_disp(" ");
+				}
+*/
+				p_disp("\n");
+				break;
+			}
+		}
+	}
+
+	clrbufs();
+
+}
+
+#endif

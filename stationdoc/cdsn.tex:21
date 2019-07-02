@@ -1,0 +1,701 @@
+\documentstyle [11pt]{report}
+\setlength{\textwidth}{6in}
+\setlength{\textheight}{8.5in}
+\setlength{\topmargin}{0in}
+\setlength{\oddsidemargin}{.25in}
+\setlength{\parskip}{.1in}
+\begin{document}
+\pagestyle{empty}
+\tableofcontents
+\listoffigures
+\newpage
+\setcounter{page}{1}
+\pagestyle{plain}
+\renewcommand{\thepage}{\thechapter-\arabic{page}}
+\setcounter{chapter}{2}
+\chapter{CDSN 86/14 Software}
+\section{Introduction}
+This is a description of the programs which go together to make the system
+which runs on the Intel iSBC 86/14 task processor within the China Digital
+Seismic Network (CDSN) chassis. The program is contained within 32K bytes of
+ROM on the 86/14 board. The board also contains 64K of multibus dual-ported
+RAM which is used for local storage within the 86/14 and for the system common
+memory used for inter-processor communication via mailboxes.
+
+\noindent The task processor has the following responsibilities:
+\begin{itemize}
+\item Processing seismic data from the master processor and determining if the
+data contains seismic events, and then recording the quality, intensity,
+time and other information related to the onset of the event.  This data is
+placed in a mailbox which is used to set up record header information by the
+master processor, and printed on the console by the calibrator processor.
+This data is used by the master processor to determine if tape writing should
+be turned on (when in full event detect mode).
+\item Collection of data from the master processor, and upon command, writing
+that data onto a tape cartridge.  Verify after write, and error retry is
+automatically performed to assure data integrity.  The system will
+automatically select the first available tape drive to write on, and will
+terminate a tape when it approaches full, then will switch to the next
+available tape drive.  The used tapes are unlocked and a short buzz is sounded
+to indicate the tape should be removed and replaced with an empty tape.
+\item Periodic checking of system mailboxes to keep the event detector informed
+of operator event parameter changes.  
+\item Execute commands from the console to manage the tape system, such as
+aborting the current tape, or unloading the other tape drive.
+\end{itemize}
+The project is written primarily in the C high level language. There are two
+small assembler pieces which perform bootstrapping operations. The system
+was written on an Emulogic PDP-11/23 workstation running the RT-11
+operating system. The Emulogic system contains an in-circuit 8086 emulator,
+and the system software includes a Whitesmiths C compiler which produces
+object code for the 8086.
+
+The software is structured and modularized. All configuration information,
+constants and magic numbers are contained in program header files which are
+included in the source at compile time.
+\section{Discussion of Software Elements}
+\noindent The software system for the task processor is divided 
+into 3 operational divisions:
+\begin{itemize}
+\item The Main subsection - this is the mainline code for the task processor, all
+decisions are made and work is directed from here.
+\item The 3M tape drivers - this subsection contains all the code required to put
+information onto the 3M tape subsystem and perform integrity verification.
+The system is intended to provide a generic interface which could be
+replaced with other I/O systems as desired.
+\item The Event Detector - this subsection is responsible for analysing seismic
+data packets and determining event onset information. The detector is
+highly tunable, and is part of a generic event detector package from the
+Albuquerque Seismic Laboratory.
+\end{itemize}
+Each subsection will be discussed separately with extra subsections for
+information about building and configuration, and placing the program onto
+PROM.
+\newpage
+\subsection{The Main Program subsection}
+This subsection describes the parts of the main subsection and how they manage
+the rest of the system.  The primary pieces of the main subsection are:
+\begin{itemize}
+\item The Bootstrap
+\item The Mailboxes
+\item The Task Loop
+\end{itemize}
+\subsubsection{The Bootstrap Program}
+The 86/14 jumps to the address of 0xFFFF0 when it is turned on or a reset is
+performed. (The 0x notation which proceeds a number indicates that it is
+hexadecimal.) The code segment register contains 0xFFFF, and the PC is 0.
+There are 16 bytes of memory in which to place the bootup routine. In the
+china system, our 32K of ROM is present in exactly the last 32K of the 22 bit
+physical memory from (0xF8000 through 0xFFFFF), so that the last 16 bytes of
+the ROM correspond to where the bootstrap needs to be.
+
+The initial boot is accomplished by CSBOOT.S86 which is a very small
+assembler program which performs a far jump (intersegment jump) to the
+address 0xF8000. The code segment register is set to 0xF800 and the PC is
+set to 0. 0xF8000 is the beginning of our PROM and is also the beginning of
+the main program. 
+
+The CSINIT.S86 assembler routine is loaded and starts at 0xF8000.  It
+performs some setup functions before calling the C program.  
+\begin{itemize}
+\item Dual port RAM lockout is turned on to keep the other processors from
+setting up race conditions while the memory is being set up.
+\item Set the data segment register to 0x0000 so that the mailboxes are within
+the scope of normal data adressing.
+\item Set the stack segment to 0x0000.
+\item Clear memory from 0x00000 through 0x0FFFF.  This clears the mailbox area
+(from 0x00000 through 0x07FFF) and our own data area (from 0x08000 through
+0x0FFFF).
+\item Set the stack to start at the end of the data subsection to extend to the end
+of available RAM.  The data itself is setup in the next step.
+\item Copy the initialization information from ROM starting at 0xFC000 to 
+RAM starting at 0x8000.  The
+initialized variables are stored by the compiler, and will now be copied to
+real RAM so that they may be used.  The compiler stores the length of the
+data subsection so that only actual data is moved.
+\item The dual port RAM lockout is turned off so that the other processors can
+access the 86/14 on-board dual port RAM.
+\item Call the main program (the c routine called main()).  If the main program
+ever returns or calls the exit() routine, the program automatically reboots.
+\end{itemize}
+\subsubsection{The System Mailboxes}
+Communication between the 3 processors within the CDSN system is done via
+shared memory which is on the 86/14 task processor board.  The addresses for
+this memory on the 86/14 is from 0x00000 through 0x07FFF.  On the massbus,
+the address of this memory is 0x04000 through 0x0BFFF.  Data are placed in
+common memory which is polled by the various processors.
+
+The header file CSMAIL.H contains all of the definitions for the mailboxes
+which the task processor will need.  This file also contains the
+information about the configuration of the seismic data channels and where
+their mailboxes are.  All addresses in this file are expressed as the
+massbuss address to be consistant with other documentation.  There is a
+conversion macro to derive the actual 86/14 local address.
+\subsubsection{The Main Loop}
+The main loop polls the mailboxes for commands and information which
+contain details about what tasks it is being commanded to do by the master
+processor. The main loop is in the program CSMAIN.C and is called from the
+CSINIT bootstrap.
+
+The main program first attempts to initialize the tape subsystem.  If that
+is unsuccessful, it reboots the machine.  If it is successful, 
+0xFF is written into the task processor up mailbox.
+
+The main program then goes into an infinite loop which it will never exit.
+There are two main duties which it does each time through the loop.  It
+does them in the order of their importance.
+
+The first duty is to check to see if there are any seismic data records
+which can be written to tape. This is done by the wrtbuf() routine. 
+wrtbuf() scans through each data type sequentially (SP, then BB, then LP, then
+VLP).  It determines where the processor is writing now (since this data
+buffer can never be written).  It scans and assures that that address does not
+appear.  It then starts at that position and rolls through the rest of the
+available buffers.  It behaves in this fashion to assure that if the system
+has gotten behind (due to waiting for the tape subsystem), that it will not
+write out bad data or write the records out of order.  When a record has been
+written out to tape, the pointer in the write queue is set to zero to indicate
+that it has been written, and to keep it from writing it again.  It then moves
+on the next buffer until there is no more work left to be done.
+
+The next scan to be done is to see if there are any data which should 
+be analysed by the event detector.
+This is done by the evensc() routine. The program scans the event
+queue for addresses which indicate that a data packet is ready for analysis.
+When it finds one, it passes that, along with other parameters to the event
+detector. The event detector returns two pieces of information. It returns
+TRUE if that record should be written to tape. It returns FALSE if it should
+not. It also returns information about possible onsets in the onset data
+buffer. If there was an onset, the event in progress flag is set to 0, and the
+onset information is moved into the event information mailbox. After all this,
+if the routine returned TRUE, the event declared flag is turned on, if it is
+FALSE, it will be turned off. There will never be an onset when the record
+flag is not also on. The event in progress flag is used to start a new event
+when the old one was not completed. This causes the new onset to be written
+into the header of the new record before it is written out. When this
+operation is done, the address pointer is set back to zero. The processor 
+loops until all writing and event analysis is done, it then goes to 
+idle processing.  If there were more than one onset in one record (the way the
+system is currently timed, this is unlikely), the onset recorded would be that
+of the last one detected in the record.
+
+After the processor has idled IDLE\_Q times or the main loop has
+executed ACTI\_Q times the housekeeping subroutine will run (housekeep()).
+Its primary duty is to check for changes in the detector paramters. When
+they change the program modifies the context buffers for the given event
+detector, and cause it to do an auto reset. This will cause a false alarm
+event to be declared so that no data is lost when the event detector
+becomes unsynchronized. ACTI\_Q is in place in case there is never any idle
+time, but due to the current specs of the CDSN project, the task processor
+is expected to use 20-40\% of the processor time.
+\newpage
+\subsection{The 3M tape subsystem subroutine library}
+The 3M tape library provides a standard I/O library to the CDSN system.  It
+provides software drivers to talk to the HCD-75 cassette drive attached to
+an iSBC board with the iSBX 217B interface.  The drivers could run on any
+intel board which uses the iSBX 217B with minor changes to the
+configuration file, and may use 1 or 2 iSBX 217B boards each with from 1 to
+4 drives.  The CDSN specs will use one iSBX 217B board on the task
+processor (the iSBC 86/14) with 2 tape drive units.  
+\subsubsection{The Configuration file CS3MCF.H}
+The configuration file for the 3M tape subsystem contains the I/O ports'
+location, what drives are attached to the system, and what processor is
+being used. It also gives information about the parallel handshake bits for
+each iSBX board.  CDSN is configured for one iSBX 217B to be plugged into
+the J4 iSBX port on the iSBC 86/14 processor with 2 drives units 0 and 1. 
+\subsubsection{The 3M constant file CS3MIO.H}
+The constant file contains all of the constants and magic numbers used by
+the 217B and the HCD-75 components which do not change from one
+configuration or CPU to another.  It contains information about tape size,
+sense register bits, and the command lists.  It also contains the
+definitions of the public error and status registers (pseudo registers),
+which provide a generic interface to the tape drivers. 
+\subsubsection{The 3M driver and subroutines CS3MIO.C}
+CS3MIO.C contain all of the subroutines required to use the tape drives. There
+are several public subroutines and there are several subroutines which are
+used internally to implement the drivers and have names beginning with an
+underline. 
+
+It is intended that the public subroutines be implemented in such a way that 
+the system using them is unaware of any aspect of the operation of the I/O
+subsystem besides what is presented in the subroutines and the error and
+status registers.  This would allow any number of different I/O drivers to
+be used interchangably with these.
+\subsubsection{Public 3M driver Subroutines}
+\begin{description}
+\item[\tt VOID clos\_tap(drive)] - close up the channel which the tape drive was
+on and release the tape drive. On the HCD-75 this performs an unlock
+operation to allow the operator to remove the tape.
+\item[\tt VOID init\_tape()] - Bring the tape subsystem on line. This sends a
+reset to the controller and an init to each drive which is configured in.
+If there are any errors getting the controller to respond, the system will
+be rebooted.  The system will sit in an infinite reboot loop if the tape 
+subsystem never comes alive.  In the CDSN, the task processor will never 
+set the processor up flag for itself.
+\item[\tt VOID tap\_mark(tapiov)] - Write a tape mark at the current position.
+Move the current position forward one. Used by the CDSN system to mark the
+end of the tapes.
+\item[\tt VOID tap\_rewind(tapiov)] - Rewind the tape. On the HCD-75, sets the
+current position to 3M tape block 0x0000. The tape is not moved now, but
+will be moved the next time actual I/O occurs.
+\item[\tt TAPE tape\_open(drive)] - Open the given drive and return a pointer to
+its input output vector (IOV). A NULL is returned on an error condition. If
+an error is fatal enough to make the open fail, an unlock command is sent
+to the drive.
+\item[\tt VOID wrt\_blk(tapiov,bufad,len)] - Takes a large buffer and writes out
+as many 3m blocks as necessary to tape. In this case wrt\_blk
+will be writing 2048 block records in CDSN data format, and it will write 2
+1024 byte 3M blocks. Note that error retry is done on each block by the
+routine \_out\_buf. 
+\end{description}
+\subsubsection{The internal use only subroutines}
+\begin{description}
+\item[\tt VOID \_adv\_tape(tapiov)] - Move the tape forward logically one
+position. Does not cause any tape movement, but increments the next
+position registers. Automatically advances to the next head if necessary.
+\item[\tt VOID \_getsts(tapiov)] - Do I/O and retrieve the 3M sense status bytes
+from the drive. The public error routine is called when done to interpret
+them.
+\item[\tt VOID \_out\_buf(tapiov,bufad)] - Output one 3M buffer to tape. After
+each write, a verify is done. If any errors occur, the process will be
+repeated up to RETRY\_Q times. If the error persists, a dummy buffer will
+be filled with 0xFF bytes and written out, the tape postion is advanced,
+and the write is attempted again. This will continue until end of tape is
+reached or another error occurs. The tape position is moved forward 1
+place.
+\item[\tt VOID \_puberr(tapiov)] - Set the public status registers to the status
+and errors which occured in the last I/O. These are derived from the sense
+status bytes retrieved from the drive. Other error and status states are
+synthesized from tape position data.
+\item[\tt VOID \_tapact(tapiov,command)] - Execute a simple 3M subsystem command.
+\_getsts is run on success or error.
+\item[\tt VOID \_errtap()] - Report sense bits on the console in case of error.
+\item[\tt VOID \_wrtbuf(tapiov,buffer)] - Perform the I/O ritual to actually write
+a buffer out to tape. \_getsys() is run on success or error.
+\item[\tt VOID \_verify(tapiov)] - Verify one 3M tape block at the current
+position. The HCD-75 will compare the data in the block against the CRC
+data it stored when the data was first written. \_getsts() is run to check
+the result of the verify operation. 
+\end{description}
+\newpage
+\subsection{Event Detector subsection}
+The event detector analyses data in standard format to see if it contains
+seismic events [Please see USGS Open File Report 83-785 for discussion].
+Some data is stored and accumlated in a context record which is kept for
+each event detector.
+Here is a discussion of the parts of the event detector
+and a brief description of what they do:
+\begin{description}
+\item[\tt BOOL e\_detect(input,context,offset,onsetb)] - This is the main-line part
+of the event detector and is the only interface to user programs. The program
+will provide it a pointer to the input buffer, the context buffer, which
+must be allocated and provided to the event detector for each logical detector
+channel which is to be analysed. The detector must also be sent a pointer to a
+buffer which will get onset information if an onset occurs during this record.
+The event detector will return TRUE if this data is part of the event.
+\item[\tt VOID pass\_one(con\_ptr,input,offset)] - pass\_one is called from
+e\_detect if this is the first run, or if detector parameters
+have been changed that invalidate the current context data. 
+\item[\tt VOID det\_par(con\_ptr)] - display new detector params - 
+Called by pass\_one after setting up all new parameters.
+Displays current detector parameters on the console.
+\item[\tt VOID indat(input,con\_ptr)] - Loads seismic buffers into internal format
+for analysis.  
+\item[\tt BOOL p\_one(con\_ptr)] - The primary function of p\_one is to detect the
+peaks and troughs of the input time series. Also, the rectified P-T values
+are compared to a threshold for noise: thx (typically 1.5625xs'). Values
+less than thx are counted, and the maximum of 20 such sucessive values are
+fed into p\_two.
+\item[\tt VOID p\_two(maxamp,con\_ptr)] - p\_two estimates the statistical
+dispersion of the background noise and calculates the four thresholds that
+are used in the detector. The dispersion is estimated by averaging the last
+16 rectified maximums received from p\_one. The average value thus obtained
+is s'. For zero-mean normally distributed P-T values, s' is an estimate of
+twice the sample standard deviation of the P-T values.
+\item[\tt INT32 xth(xthi,con\_ptr)] - Calculate threshold from encoded factors
+xthi Adapted from an algorithm by R.R. Reynolds and C.R. Hutt.
+\item[\tt VOID period(con\_ptr,p\_kont)] - Calculate period of the wave at onset.
+Extrapolate the time of the event sample. Calculates an integer seconds
+figure and a mantissa portion which is the milliseconds after the second.
+\item[\tt INT16 time\_f(con\_ptr,t\_kont,tc)] - Find time of
+onset. Interpolate time of onset similar to how period is calculated.
+\item[\tt VOID dum\_out(con\_ptr)] - Determine the state of the tape write on/off
+flags. This determines how long the post data is to be recorded after the
+actual event is finished. It also determines how long to disable the
+detector after the event to remove spurious detections. As implemented
+here, the detector is disabled for $2 \times {\rm wait\_blk}$
+samples and then reenabled.
+Thresholds are computed anew while data are being written to the output
+during the next $2 \times {\rm wait\_blk}$ samples.
+\item[\tt BOOL event(con\_ptr)] - Detects events using thresholds th1 and th2. 
+For N\_HITS $=$ 4 an event will be detected if 4 values are greater than th2, or
+if 3 values are greater than th2, and one (or more) of the 3 are greater
+than th1 (see O-F report 83-785). 
+\item[\tt VOID wbuff(con\_ptr)] - Writes values to buffers when an event might be
+in progress.
+\item[\tt VOID ibingo(con\_ptr)] - Sets parameters when an event has been
+detected.
+\item[\tt VOID onsetq(con\_ptr)] - Estimates parameters of signal onset, calls
+onset().
+\item[\tt VOID onset(con\_ptr,ibak,sper,p1,tc,fp,pt0,pt1,pt2, pt3,pt4)] -
+Calculates period, amplitude,SNR series (O-F 83-785), and converts sample
+number to time. Outputs the estimates. 
+\end{description}
+\newpage
+\section{Building the CDSN program for the 86/14}
+There are a few command files which are provided to build the task
+processor program.  There are only a few steps involved in the build
+process.
+
+The main disk contains all of the program sources and the basic
+programming environment is marked ``China System Development.''  This
+disk is always in drive 0 (the left drive), and should be booted when
+the system is brought up.
+
+To build the system, place the disk marked ``Whitesmiths Cusps''
+into the right drive (drive 1, DY1:).  Then the command file can be
+executed to actually build all pieces of the CDSN system.  This is
+done by typing ``IND CDSN'' at the dot.  This will build all main pieces,
+link them together, and set up the files to be burnt onto PROMs.
+
+The machine will proceed unaided (unless there are programming
+errors), until it is ready to make PROMs.  At this time, the 86/14
+system uses two PROMs to hold the entire system and its data.  These
+PROMs should be 27128A-2 or equivalent.  The OTP (one time
+programmable) plastic versions of these should be used for PROMs sent
+to China as export restrictions do not allow the windowed PROMs to be
+exported.  The plastic PROMs are functionally identical to the
+windowed programs except that they cannot be erased.
+
+The program will ask you if the PROM programmer is ready in remote
+mode.  Make sure that the programmer is on, and hit the following keys
+on the DATA I/O programmer [SELECT] [F] [B] [ENTER] [ENTER].  Also
+make sure that the printer port is directed to the programmer.  The
+type ``YES'' to the prompt on the Emulogic.  The command file will then
+enter a dialog with you to guide you through the PROM process.
+
+When this is complete, you will be back to RT-11 (at the dot), and may
+continue on from there.  If you wish to clear off the work files made
+during the last build to give you enough room to program, type in
+``@CLEAN'' at the dot.  This will clean off the system disk and
+squeeze it.
+\newpage
+\section{Parameters Used to Tune the Event Detector
+and an Explanation of the Onset Data Printout}
+The purpose of this section is to describe the parameters that may be
+input to the event detector to change its performance.  These
+parameters are described in more detail in the USGS open file report
+83-785 by James N. Murdock and Charles R. Hutt. 
+They are
+described herewith as parameters used to monitor the amplitude of a
+signal and as parameters used to monitor the frequency content of a
+signal.
+\begin{table}[tbh]
+\begin{center}
+	\begin{tabular}{| r r | r r |}
+		\hline
+		\multicolumn{1}{|c}{xthi}
+			&\multicolumn{1}{c}{Value Factor}
+			&\multicolumn{1}{|c}{xthi}
+			&\multicolumn{1}{c|}{Value Factor} \\
+		\multicolumn{1}{|c}{(octal)}
+			&\multicolumn{1}{c}{(decimal)}
+			&\multicolumn{1}{|c}{(octal)}
+			&\multicolumn{1}{c|}{(decimal)} \\
+		\hline
+			10 & 1.000 & 30 & 3.000\\
+			11 & 1.125 & 40 & 4.000\\
+			12 & 1.250 & 50 & 5.000\\
+			13 & 1.375 & 60 & 6.000\\
+			14 & 1.500 & 70 & 7.000\\
+			15 & 1.625 & 100 & 8.000\\
+			16 & 1.750 & 300 & 24.000\\
+			17 & 1.875 & 377 & 31.875\\
+			20 & 2.000 & & \\
+		\hline
+	\end {tabular}
+\caption{Encoded threshold factors.\label{octal-codes}}
+\end{center}
+\end{table}
+\subsection{Parameters Used to Monitor the Amplitude of a Signal}
+\begin{description}
+\item[XTH1] - is an octal code that defines the factor 
+(see table \ref{octal-codes})
+of ``twosd.'' Twosd is a measure of the seismic background noise that is
+output by the filter of each detector. (The responses of the
+respective filters are represented in figures 1 and 2.) Xth1 is used
+is used to calculate a threshold value: th1, such that th1 $=$ xth1 $\times$
+twosd. As described in the Open File Report (on page 14), An event
+will be declared if one amplitude value of the signal is greater than
+th1 and two other amplitude values are greater than th2, assuming that
+all of the amplitude values pass the tests described in ``Parameters
+Used to Monitor the Frequency Content of a Signal.''
+\item[XTH2] - defines threshold th2 in the same manner as xth1
+defines th1: th1 $=$ xth2 $\times$ twosd.  One way a signal can be detected is
+described above.  A signal may be detected in another way as well:
+Assuming the frequency criteria have been met, an event will be
+declared when ``n\_hits'' values are greater than th2.  In the Open File
+Report, n\_hits was fixed at the value 4 (page 14).  The parameter
+n\_hits is now tunable, it must be given a value greater than, or equal
+to, 4 decimal.
+\item[XTH3] - defines threshold th3 in the same manner as the above
+thresholds: th3 $=$ xth3 $\times$ twosd.  As described in the Open File Report
+(page 15), th3 is used to search for the onset of a signal. Typically
+th3 is set to 10 (octal).  For proper operation of the detector, xth1
+$>$ xth2 $\ge$ xth3.
+\item[XTHX] - similarly defines a threshold, thx, such that thx $=$ xthx
+$\times$ twosd.  Thx is used to keep unusually large values from being
+included in the computation of twosd: Values larger that thx are not
+used to compute the estimate of the amplitude of the background
+noise, this keeps spikes from raising the thresholds.  In normal
+operation, xthx should be set no smaller than 14 (octal).
+\end{description}
+\subsection{Parameters Used to Monitor Frequency Content}
+It is important to remember that the detector monitors the amplitudes
+of the background noise and signals in much the same way as a
+seismologist might view a seismogram: The detector analyses the
+amplitudes (that is, the peak to trough differences) of the digital
+seismic data.  In other words, in contrast to the typical power level
+detector, the analyses are performed in the time domain, rather than
+primarily in the frequency domain.
+\begin{description}
+\item[FILHI] - is used to ensure that the amplitudes of a candidate
+signal are not too close together.  The units of filhi are in samples.
+Filhi can be used to help reduce the effect of spikes and man-made
+(cultural) noises.  As an example of how filhi works, for filhi $=$ 8,
+if two amplitude values (each greater than th2) are closer together
+than 8 samples, the second amplitude value will not be used to help
+trigger the detector:  Filhi will cause rejection of the second
+amplitude value.
+\item[FILLO] - is used to ensure that the amplitudes of a candidate
+signal are not too far apart.  The units of fillo are in samples.
+Fillo is used to help reduce the effect of earth noise.  As an example
+of how fillo works, for fillo $=$ 40, if two sucessive amplitude values
+(each greater than th2) are farther apart than 40 samples, the first
+amplitude value will not be used to help trigger the detector:  Fillo
+will cause rejection of the first amplitude value.  Indeed, the
+beginning of the time window (described below) will be moved to the
+time of the second amplitude value.
+\item[IWIN] - is another time window.  The units of iwin are in
+samples.  (Typically, a window is 4 to 10 seconds long.)  When the
+first amplitude of a candidate signal exceeds th2, the window begins
+at the time of this amplitude.  If the subsequent amplitudes meet the
+constraints of filhi and fillo, a signal will be declared, if, in the
+window, n\_hits amplitudes are greater than th2, or if three amplitudes
+are greater than th2 with one of them being greater than th1.
+\item[N\_HITS] - n\_hits are the number of peak to trough values with 
+amplitudes greater than th2, but less than th1, that are required
+to trigger an event.  N\_hits must be
+equal to, or greater than, 4 decimal.
+\end{description}
+\subsection{Summary of Relationships and Limits}
+\begin{itemize}
+\item xth1 $>$ xth2 $\ge$ xth3; xth1 $\le$ 177 (all in octal)
+\item xthx $>$ 14 (octal)
+\item iwin $\ge$ fillo $>$ filhi (decimal)
+\item n\_hits $\ge$ 4 (decimal)
+\end{itemize}
+\subsection{Values Suggested for Input and some Suggestions on 
+Further Tuning the Detector}
+
+The following values are designed to provide detection of all P wave
+signals that are clearly visible on a seismogram display, yet to
+provide for few false alarms in normal operation.
+\begin{table}[tbh]
+\begin{center}
+	\begin{tabular}{|l|r|r|}	\hline
+			&	SP	&	BB	\\ \hline
+		filhi	&	8	&	4	\\
+		fillo	&	80	&	40	\\
+		iwin	&	160	&	200	\\
+		xth1	&	20	&	77	\\
+		xth2	&	15	&	17	\\
+		xth3	&	10	&	10	\\
+		xthx	&	15	&	30	\\	
+		n\_hits	&	4	&	5	\\ \hline
+	\end{tabular}
+\end{center}
+\caption{Example Default Detector Settings}
+\end{table}
+If the design goals are not met, adjustment of the parameters may be
+required.  (The best proceedure might be to record continuously so
+that the parameters may be set off line.)  To reduce false alarms,
+one should try raising, and testing the effect of a new setting,  the
+following parameters:
+\begin{enumerate}
+\item xth1 
+\item xth2 
+\item xthx
+\item filhi (to decrease effect of cultural noise)
+\end{enumerate}
+If clear events are missed, this likely means that they are not
+in-band to the detector (the P-wave signals might have periods that
+are longer than 2 seconds).  Here one might try lowering xth1,
+increasing fillo, and, if necessary, increasing iwin.  Again, the best
+way to tune the detector is offline.  This is the way tuning is usually
+done at ASL.
+\newpage
+\subsection{The Meanings of the Onset Values Output}
+The following gives the meaning of the different fields printed on the
+console when an event is declared.  Here is an example message:
+\begin{verbatim}
+SP EVENT DETECTED
+
+SP c 00 11999 86 0128 19:48:05.78 00162048 00.25 009054
+\end{verbatim}
+\begin{description}
+\item[SP] - This denotes what seismometer and band were being monitored
+for events.  For the China System, only two channels are monitored
+(both for the Z component): SP (from the Chinese short period
+seismometers), and BB (from the Swiss seismometers on the Broad Band
+output).
+\item[c] - Denotes the polarity of the first break of the signal (a `c'
+or `d').
+\item[00] - The ``look back'' value which signifies how far the detector
+looked back to find the onset of the signal.  The number will be 00,
+01, or 02 amplitudes (see pg 15 of Open File Report).
+\item[11999] - The quality determination of the onset (pg 16 of the Open
+File Report).  An example of a well-determined onset might be {00\em abc},
+with a look back of 00, where {\em a, b, {\rm and} c,} are greater than 2.  An
+example of a poorly determined onset might be ab1cd, with a look back
+of 01 or 02, where {\em a, b,} are 1 or larger, and {\em c} and {\em d}
+are any positive
+number within their range.
+\item[86] - The year part of the time when the onset signal was
+declared.
+\item[0128] - The day of the year (1 is January 1) of the onset.
+\item[19:48:] - The hour and minutes of the onset (GMT).
+\item[05.78] - Seconds (expressed to two decimal places) 
+of the actual onset wave.
+\item[00168827] - The maximum amplitude of the first four cycles of the signal
+(measured in digital counts).
+\item[00.25] - The average period of the first 4 cycles of the signal (in
+seconds or 1/hz).
+\item[009054] - The value of ``twosd'' which is the amplitude of the
+background. This is the value that was used to
+calculate the threshold values th1, th2, th3, and thx for detecting
+the event and timing.
+\end{description}
+\newpage
+\subsection{Setting CDSN parameters with the Console}
+Whenever the CDSN machine is turned on, rebooted, starts a new tape,
+or when a event parameter is changed, the console will print all of
+the event detector parameters.  This way the Data Management Center
+will have copies of these parameters when the logs are turned in.
+
+The machine automatically comes up in full event detected mode.  This
+means that the signals from the SP and BB are not written
+to tape unless events are detected.  This is the normal operating
+mode.
+
+There are times during testing and tuning when it may be necessary to
+make the machine record all data, and not to use the event detector.
+This is called continuous recording mode.  This should not be used
+except during special situations since the tape cartridges fill up in
+a mere 50 hours causing a station to produce too much data which can
+easily overload the Data Management Center.  The continuous mode may
+be set individually for short period and broad band.  These are set in
+the following way:
+\begin{center}
+	\begin{tabbing}
+		\tt [BBCONT;FF]\hspace{.5in}\=(turn on BB continuous) \\
+		\tt [SPCONT;FF]\>(turn on SP continuous) \\
+		\tt [BBCONT;00]\>(switch back to event mode) \\
+		\tt [SPCONT;00]\>(switch back to event mode) \\
+	\end{tabbing}
+\end{center}
+\noindent If this is set correctly the machine will respond:
+
+xxCONT DATA-OK*************************
+
+When in continuous mode, the event detector can be run of left off.
+This causes the event detector to simply print out onset messages, but
+does not determine if records should be put on tape.  In continuous
+mode, all records are written to tape.  To turn the event detector on
+or off type in:
+\begin{center}
+	\begin{tabbing}
+	\tt [BBSPEC;FF]\hspace{.5in}\=\rm (to turn the BB detector on) \\
+		\tt [BBSPEC;00]\>(turn the BB detector off) \\
+		\tt [SPSPEC;FF]\>(turn the SP detector on) \\
+		\tt [SPSPEC;00]\>	(turn the SP detector off) \\
+	\end{tabbing}
+\end{center}
+In all cases if the message was entered correctly, the DATA-OK message
+will appear, otherwise an ERROR message will appear and the command
+should be retyped.
+
+There are a series of commands to set the actual event parameters.
+Data are entered in the base which they are supposed to be
+in.  When a value is sucessfully changed (DATA-OK), the event detector
+will print out all of the parameters for that detector.  Here is an
+example of how to set the defaults given earlier.
+\begin{center}
+	\begin{tabbing}
+		\tt [SPFIHI;0008]\hspace{.5in}\=\tt [BBFIHI;0004] \\
+		\tt [SPFILO;0080]	\>	\tt [BBFILO;0040]	\\
+		\tt [SPIWIN;0160]	\>	\tt [BBIWIN;0200]	\\
+		\tt [SPXTH1;0020]	\>	\tt [BBXTH1;0077]	\\
+		\tt [SPXTH2;0015]	\>	\tt [BBXTH2;0017]	\\
+		\tt [SPXTH3;0010]	\>	\tt [BBXTH3;0010]	\\
+		\tt [SPXTHX;0015]	\>	\tt [BBXTHX;0030]	\\
+		\tt [SPNHIT;0004]	\>	\tt [BBNHIT;0005]	\\
+	\end{tabbing}
+\end{center}
+Type the commands in one at a time, and pause after typing the final
+`]' until the DATA-OK message comes out, and the new event parameters
+have printed.
+
+\noindent NOTE: When adjusting parameters in the field, it is advisable to only
+increase or decrease, by a small amount,  one parameter at time.
+Let the system operate for some time to determine the effectiveness
+of the change.
+
+\noindent NOTE: When the system is rebooted (for any reason), it forgets
+all of the operator settings, and returns to its initialized defaults.
+The operators must re-enter any changed parameters each time this happens.
+\newpage
+\section{CDSN 86/14 Software Sources}
+Here is a listing of all of the code and command files used to
+create the proms for the 86/14 processor.
+\subsection{CSBOOT.S86 - Initial boot transfer code}
+\input [.listings]CSBOOT.S86 
+\subsection{CSINIT.S86 - Initialization after boot}
+\input [.listings]CSINIT.S86 
+\subsection{CSCONF.H - PROM configuration}
+\input [.listings]CSCONF.H 
+\subsection{CSSTND.H - Project standards definition}
+\input [.listings]CSSTND.H 
+\subsection{CSMAIL.H - CDSN system mailbox definitions}
+\input [.listings]CSMAIL.H 
+\subsection{CSSTAT.H - Statistical Collections}
+\input [.listings]CSSTAT.H 
+\subsection{CSMAIN.C - Mainline Collector Code}
+\input [.listings]CSMAIN.C 
+\subsection{CS3MIO.H - 3M tape drive public constants and definitions}
+\input [.listings]CS3MIO.H 
+\subsection{CS3MCF.H - Configuration for this 3M subsystem}
+\input [.listings]CS3MCF.H 
+\subsection{CS3MIO.C - Standard Tape driver for 3M subsystems}
+\input [.listings]CS3MIO.C 
+\subsection{CSFILT.H - Filter package definition}
+\input [.listings]CSFILT.H 
+\subsection{CSCONT.H - Detector context definition}
+\input [.listings]CSCONT.H 
+\subsection{CSSEPK.H - Sensor packet definition}
+\input [.listings]CSSEPK.H 
+\subsection{CSEVDT.C - Event detector and related subroutines}
+\input [.listings]CSEVDT.C 
+\subsection{CS86LB.C - 86/14 internal subroutine library}
+\input [.listings]CS86LB.C 
+\subsection{CLEAN.COM - Command file to remove all built materials}
+\input [.listings]CLEAN.COM 
+\subsection{CDSN.COM - IND command file to build system}
+\input [.listings]CDSN.COM 
+\subsection{CSCOMP.COM - IND command file to compile and assemble pieces}
+\input [.listings]CSCOMP.COM 
+\subsection{CSLINK.COM - IND command file to prepare link outputs}
+\input [.listings]CSLINK.COM 
+\subsection{CSBURN.COM - IND command file to burn proms on Data I/O 29A programmer}
+\input [.listings]CSBURN.COM 
+\end{document}

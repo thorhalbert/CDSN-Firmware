@@ -1,0 +1,1004 @@
+\begin{verbatim}
+/*----------------------------------------------------------------------*
+ *  C h i n a   D i g i t a l   S e i s m o g r a p h   N e t w o r k   *
+ *     iSBC 86/14 - Project Recorder Handling and Event Detection       *
+ *----------------------------------------------------------------------*
+ *      CSMAIN.C - Main Component of software which runs on the         *
+ *      Intel iSBC 86/14 computer embedded within the China Digital     *
+ *      Seismograph Hardware.  This will be burned on a prom, and will  *
+ *      interface with two other processors and be responsible for      *
+ *      the following:                                                  *
+ *                                                                      *
+ *      Control of 3M HCD-75 subsystems which are attached to the       *
+ *      86/14 via the Intel iSBX 217B tape drive interface.  The tape   *
+ *      drives will be used to record seismic data packets at the       *
+ *      request of the master 86/24 cpu.  The interface performs a      *
+ *      hardware verify to check data versus CRC for each record as     *
+ *      it writes it out.  If after a certain number of retries the     *
+ *      data cannot be accurately written, a record of 'FF' is          *
+ *      written to tape, and the tape attempts the next record.         *
+ *      The program attempts to finish a tape some 10 records before    *
+ *      the real end of tape, and writes 3 tape marks.  When the        *
+ *      processor needs a tape drive it looks to find the first one     *
+ *      which has a tape and is ready, and uses that one.  It will      *
+ *      therefore go through all of the ready tape drives one after     *
+ *      the next.  After finishing a tape, the program will perform     *
+ *      a hardware unlock so that the tape will not be reused without   *
+ *      operator intervention.  Provisions are available so that        *
+ *      abort mailboxes may be set from the calibrator to cause the     *
+ *      processor to unlock tape drives which are not being used,       *
+ *      and will allow the current tape to be terminated at any         *
+ *      point (the processor writes tape marks as if it had hit the     *
+ *      EOT and unlocks the drive).                                     *
+ *                                                                      *
+ *      This processor will also contain the seismic event detector     *
+ *      which analyses seismic packets and declares events.  Upon       *
+ *      declaration of an event, the detector will compute the exact    *
+ *      parameters of the event onset and report them via mailbox to    *
+ *      the calibrator CPU which will print them on the system          *
+ *      console.  Processor will also retrive detector paramters        *
+ *      from mailboxes and provide them to the detector.  The           *
+ *      detector is run on packets at the command of the master cpu.    *
+ *      Upon startup or parameter change, the detector automatically    *
+ *      declares an event to assure that no data is lost due to the     *
+ *      detector being unsyncronized.                                   *
+ *                                                                      *
+ *      As of edit 003, to assure that any new onsets are recorded      *
+ *      in the headers of records even if the old event has not         *
+ *      been declared over, an event in progress flag will be set       *
+ *      to off which will cause the new onset to be put in the          *
+ *      header of the current record.                                   *
+ *----------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------*
+ *      This software was written by Scott Halbert for the Albuquerque  *
+ *      Seismological Laboratory (US Geological Survey).                *
+ *----------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------*
+ *      Modification and history of CSMAIN.C                            *
+ *                                                                      *
+ *-----Edit---Date----Who-------Description of changes------------------*
+ *      001 13-Jun-85 SH        Beginning of Coding/New Template        *
+ *      002 29-Aug-85 SH        Full Documentation/Cleanup              *
+ *      003 12-Sep-85 SH        Add the event in progress flag          *
+ *                               Also, we must now provide the onset    *
+ *                               data to the other processors           *
+ *      004 17-Sep-85 SH        We must convert the onset information   *
+ *                               into packed BCD for the other          *
+ *                               processors                             *
+ *      005 25-Sep-85 SH        Addresses which are in the write queue  *
+ *                               and are in the event queue are         *
+ *                               massbuss address and not local, so     *
+ *                               addresses must be converted by -=0x4000*
+ *      006 25-Sep-85 SH        Add the "Abort current tape" and the    *
+ *                               "unload other drives" commands         *
+ *      007 21-Oct-85 SH        The Unload command is unloading the     *
+ *                               wrong tape drive                       *
+ *      008 12-Nov-85 SH        The machine is corrupting occasional    *
+ *                               SP records and machine is crashing     *
+ *                               General bug stomping in event routine  *
+ *                               Since things work with EVENT_D undef   *
+ *      009  9-Dec-85 SH        We may be locking out dual port memory  *
+ *                               from other machines... sleep after     *
+ *                               each duty cycle                        *
+ *      010 13-Dec-85 SH        All of the above seems to be an bad     *
+ *                               interaction with the 80/24 during our  *
+ *                               init phase -- so we now lock the       *
+ *                               multibus from the dual port ram before *
+ *                               we clear ram, and now we turn off the  *
+ *                               lock after the processor up flag set   *
+ *      011 13-Dec-85 SH        Pretty up, get ready to print out       *
+ *                               messages and stuff                     *
+ *      012 18-Dec-85 SH        We will init the tty pointer for the    *
+ *                               calibrator (just in case it is not     *
+ *                               there)                                 *
+ *      013 19-Dec-85 SH        Fix bug in tape select subroutine       *
+ *      014 16-Jan-86 SH        Add summary messages                    *
+ *      015  4-Feb-86 SH        Simplify bcdcvt()                       *
+ *      016  4-Feb-86 SH        Bcdcvt() is still filled with bugs,     *
+ *                               events do not contain right data       *
+ *      017  6-Feb-86 SH        Try some more debug things in bcdcvt()  *
+ *      018  6-Feb-86 SH        Bug was not in bcdcvt(), problem was    *
+ *                               fixed by adding the lookback variable  *
+ *      019 10-Feb-86 SH        When the onset SNR's are 99999, they    *
+ *                               do not come out correctly.  I think    *
+ *                               that this is because it is bigger than *
+ *                               and int, and not handled correctly     *
+ *      020 10-Feb-86 SH        Use lngout to display _recnt            *
+ *                               This version went to china (V1.1)      *
+ *                               on 18-Feb-86 Edit 21 to be V1.2        *
+ *      021 18-Feb-86 SH        Turn processor up flag on before doing  *
+ *                               the startup message to assure that     *
+ *                               we won't time out getting the date     *
+ *                              Allow user to enter numbers in their    *
+ *                               proper BCD format at the console, and  *
+ *                               convert to proper notation inside      *
+ *      022  5-Mar-86 SH        Allow printout of build date            *
+ *      023  6-Mar-86 SH        When SPFIHI is set to zero, use defaults*
+ *      024 12-Mar-86 SH        Allow n_hits defaults etc.              *
+ *      025 13-Mar-86 SH        Print tape error data if any            *
+ *      026 18-Mar-86 SH        Allocate the detector context areas on  *
+ *                               the stack instead of ROM               *
+ *      027 21-Mar-86 SH        Add a facility to monitor the amount    *
+ *                               of time consumed in normal operations  *
+ *                               for determining % utilization          *
+ *      028 28-Mar-86 SH        Address the problem of the records      *
+ *                               getting written out in the wrong order *
+ *                               when we get behind.  Also make sure    *
+ *                               we don't write out the uncompleted     *
+ *                               record which is in progress            *
+ *      029  7-Apr-86 SH        Add code for new detector parameters    *
+ *      030  9-Apr-86 SH        Add a more useful tape end message      *
+ *      031 10-Apr-86 SH        Fancy up internal documentation for     *
+ *                               project book and next China visit      *
+ *      032  7-May-86 SH        Configure out the event detector rules  *
+ *                               until they can be made frendlier       *
+ *      033  8-May-86 SH        Make n_hits variables into mailboxes    *
+ *      034  9-May-86 SH        We must clear some new flag variables   *
+ *                               to assure syncronization with the      *
+ *                               cal mpu concerning onset printing      *
+ *      035 12-May-86 SH        Redo the write que code since it is     *
+ *                               not really needed                      *
+ *      036 14-May-86 SH        The data mailboxes have been set to     *
+ *                               FF's in csinit, we will now go through *
+ *                               and place an identifying marker on     *
+ *                               each first byte so we can see were     *
+ *                               bogus empty records come from          *
+ *      037 17-Jun-86 SH        Edit 36 went to china, so now V1.3      *
+ *                               The tracking problem of the event      *
+ *                               detector seems to be caused by the     *
+ *                               detector not being called on all       *
+ *                               of the records.  It seems that we      *
+ *                               occasionally (once or twice in a       *
+ *                               continuous tape), get too far behind   *
+ *                               to do everything we need to in an SP   *
+ *                               record interval, so, when the event    *
+ *                               detector returns, we zero the next     *
+ *                               request, and it gets skipped.  This    *
+ *                               edit will check for this and print     *
+ *                               diagnostic messages.  We won't fix     *
+ *                               it yet, just testing an hypothosis.    *
+ *      038  1-Jul-86 SH        It appears that the above condition     *
+ *                               is caused in unusual cases when too    *
+ *                               many non-priority activities are       *
+ *                               attempted and then a priority activity *
+ *                               is done, and it can not be completed   *
+ *                               on time.  A new priority scheme is     *
+ *                               being implemented to fix this.  We     *
+ *                               will still print out the above message *
+ *                               and will not repair that, as this      *
+ *                               should fix that situation, and the     *
+ *                               message is needed for verification.    *
+ *      039  5-Aug-86 SH        Actually repair above condition by      *
+ *                               not resetting queue entry and thereby  *
+ *                               losing the next request.               *
+ *----------------------------------------------------------------------*/
+
+char *csmain = "csmain V1.3[039]";
+
+extern char *cs3mio,*csevdt,*cs86lb;
+
+#define maindef                 /* Make .h's define all root definitions */
+
+#include "src:csstnd.h"         /* Standards definitions */
+
+#ifdef TIME_TRACK
+#include "src:csstat.h"         /* Timing and statistics gathering */
+#endif
+
+#include "src:csfilt.h"         /* Detector filters and parameters */
+#include "src:cssepk.h"         /* Sensor packet descriptions */
+#include "src:cscont.h"         /* Detector context descriptions */
+
+#include "src:csmail.h"         /* System mailbox definitions */
+
+#include "src:cs3mio.h"         /* Constants for 3M subsystem */
+#include "src:cs3mcf.h"         /* Configuration of this subsystem */
+
+#include "today.tmp"            /* The current date spec */
+
+#define ACTI_Q 20000            /* Number active loops before housekeeping */
+
+#define SLEP_T 1000             /* [009] Loop for this many cycles */
+
+TAPE *tapdrv[DRIVES] = { NULL, NULL };  /* IOV's for all tape drives */
+WORD actlop = 0;
+WORD idllop = 0;                /* Active and idle looping */
+WORD drive = 0;                 /* First drive to try upon bootup */
+ONSETI onsetd = {0};            /* Store onset info from detector [003] */
+
+BYTE bcdbuf[6] = 0;             /* Our BCD conversion area */
+
+INT32 wrt_in = 0;               /* Count of before writes */
+INT32 wrt_out = 0;              /* Count of after writes */
+INT32 evt_in = 0;               /* Count of event ins */
+INT32 evt_out = 0;              /* Count of event outs */
+INT32 evt_ons = 0;              /* Number of onset process outs */
+INT32 houkps = 0;               /* Number of housekeeps */
+
+#ifndef TIME_TRACK
+#define star_timer(x)
+#define end_timer(x)
+#endif
+
+/*----------------------------------------------------------------------*
+ *      Function: VOID main() - mainline code and operational loop      *
+ *----------------------------------------------------------------------*
+ *      Bring up tape subsystem, tell world that we are on line.        *
+ *      Look in mailboxes to see if there are any tasks which the       *
+ *      master cpu wants us to do.  Loop infinitely until there is.     *
+ *----------------------------------------------------------------------*
+ *      Arguments:      No arguments                                    *
+ *----------------------------------------------------------------------*
+ *      Fatal Errors:   Fails which occur trying to init the tape       *
+ *                       subsystem may cause a fatal failure.           *
+ *----------------------------------------------------------------------*/
+
+VOID main()
+{
+
+        CONTEXT detarr[EVQUE];  /* Allocate onto stack here */
+
+#ifdef TRACE
+        _tstack=0;
+#endif
+        TRACER("main");
+
+        detcon[0]=detarr+0;
+        detcon[1]=detarr+1;
+
+        detcon[0]->wait_blk=SPWAB;
+        detcon[1]->wait_blk=BBWAB;
+        detcon[0]->def_tc=SPTC;
+        detcon[1]->def_tc=BBTC;         /* [029] */
+
+        actlop=idllop=0;        /* Reset housekeeping registers */
+
+        procup();               /* Fill the system up mailbox */
+        init_tape();            /* Initialize the tape subsystem */
+
+        housekeep();    /* Get initial event detector settings first */
+
+        FOREVER {
+
+                if ((++actlop)>ACTI_Q) {
+                        wrtbuf(2);              /* Just in case */
+                        wrtbuf(3);              /* Just in case */
+                        star_timer(HOUSKP_TIMER);
+                        housekeep();
+                        end_timer(HOUSKP_TIMER);
+                }
+
+                if (wrtbuf(0)) continue;        /* Write SP First */
+                if (evensc(0)) continue;        /* Event detect SP */
+
+                if (wrtbuf(1)) continue;        /* Write BB */
+                if (evensc(1)) continue;        /* Event detect BB */
+
+                if (wrtbuf(2)) continue;        /* Write LP */
+                if (wrtbuf(3)) continue;        /* Write VLP */
+
+                star_timer(HOUSKP_TIMER);
+                housekeep();
+                end_timer(HOUSKP_TIMER);
+
+                ledoff();
+                snooze();                       /* [009] Wait SLEP_T */
+
+        }                       /* Loop */
+}
+/*----------------------------------------------------------------------*
+ *      Function: VOID procup() - Tell the world that we are up         *
+ *----------------------------------------------------------------------*
+ *      Mark the low order byte of the mailbox with FF to tell the      *
+ *      other processors what we are up and running.  Since we are      *
+ *      faster, we will probably be up before they are.  Print          *
+ *      out the banner with our version numbers and build date.         *
+ *----------------------------------------------------------------------*
+ *      Arguments:      No arguments                                    *
+ *----------------------------------------------------------------------*/
+
+VOID procup()
+{
+
+        TEXT *begptr;
+        INT16 seq1,seq2,seq3;
+
+        TRACER("procup");
+
+        seq3=0;                                 /* [036] Mark buffers */
+        for (seq1=0;seq1<MAXWQ;seq1++) {
+                for (seq2=0;seq2<wrt_lst[seq1].bufquan;seq2++) {
+                        begptr = (TEXT *) wrt_lst[seq1].buf_lst[seq2];
+                        begptr += MBOFF;
+                        *begptr = ++seq3;
+                }
+        }
+                        
+
+        *outtty = BEGTTY;       /* beginning of tty buffer */
+        *we_r_up=0xFF;          /* Flag that our processor is alive */
+        lockoff();              /* [021] Turn the locks off first */
+        ledoff();
+
+        p_warn("86/14 Here!  ");
+        p_disp(csmain);
+        p_disp(" - ");
+        p_disp(cs3mio);
+        p_cont();
+        p_disp(csevdt);
+        p_disp(" - ");
+        p_disp(cs86lb);
+        p_disp("  ");
+        p_disp(TODAY);
+        p_crlf();                       /* Print nice messages */
+
+        RETURN_VOID;
+
+}
+\end{verbatim}
+\begin{verbatim}
+/*----------------------------------------------------------------------*
+ *      Function: BOOL wrtbuf(quename) - Scan packets to write on tape  *
+ *----------------------------------------------------------------------*
+ *      Look through the write queue to see if there are any packets    *
+ *      which we need to write to tape.  If so, write them out and      *
+ *      poke the mailbox so that we won't do it again.                  *
+ *----------------------------------------------------------------------*
+ *      Returns:        Return true if any work was done                *
+ *----------------------------------------------------------------------*
+ *      Arguments:      There are no arguments                          *
+ *----------------------------------------------------------------------*/
+
+BOOL wrtbuf(quename)
+INT16 quename;
+{
+
+        WORD seq,seqmax;
+        BYTE *curtrp,*trptr,*otptr;
+
+        TRACER("wrtbuf");
+
+        seqmax = wrt_lst[quename].bufquan;
+        for (seq=0; seq<seqmax; seq++) {
+                trptr=(*(wrt_lst[quename].wrtptr[seq]));
+                if (trptr==NULL) continue;      /* Do real work */
+                ledon();
+                curtrp=trptr+MBOFF;
+                wrt_in++;
+                tapeout(curtrp);
+                wrt_out++;
+                wrt_lst[quename].recprt++; /* [030] */
+                otptr=(*(wrt_lst[quename].wrtptr[seq]));
+                if (otptr!=trptr) {
+                        p_warn("Write queue #");
+                        p_numout(quename,10);
+                        p_disp(" resyncronised.");
+                        p_crlf();
+                } else  (*(wrt_lst[quename].wrtptr[seq]))=NULL; /* [039] */
+                RETURN(TRUE);
+        }
+        RETURN(FALSE);
+}
+/*----------------------------------------------------------------------*
+ *      Function: BOOL evensc(evtque) - Look for work for the detector  *
+ *----------------------------------------------------------------------*
+ *      Scan through the event detector queues and look for any work    *
+ *      for the detector to do.  If so, call the detector with the      *
+ *      proper data and context pointers.  As of edit 003, we are to    *
+ *      check if there is already an event in progress, and if there    *
+ *      is and we have a new onset, we are to reset the event in        *
+ *      progress flag to cause a new event to be declared.              *
+ *----------------------------------------------------------------------*
+ *      Arguments:      No arguments                                    *
+ *----------------------------------------------------------------------*
+ *      Returns:        Return TRUE if any work was done.               *
+ *----------------------------------------------------------------------*/
+
+#define bcdload(outdata,indata,arsize) bcdcvt((DWORD) (indata)); \
+        for (i=0; i<arsize; i++) outdata[i]=bcdbuf[i+(6-arsize)]; 
+
+BOOL evensc(evenq) 
+INT16 evenq;
+{
+
+        WORD i;
+        BOOL evenstat;
+        struct even_dat *ev_onst;
+        BYTE *evptr,*ovptr;
+
+        TRACER("evensc");
+
+        evptr=(*(event_q[evenq].edptr));
+
+        if (evptr) {
+                ledon();
+                evptr+=MBOFF;
+                evt_in++;
+                star_timer(EVENTD_TIMER);
+                evenstat=e_detect(evptr,
+                                detcon[evenq],
+                                (INT16) event_q[evenq].chaoff,
+                                &onsetd);
+                end_timer(EVENTD_TIMER);
+                evt_out++;
+                bcdload(bckgnd,detcon[0]->twosd,4);
+                if (onsetd.new_onset) {
+                        ev_onst=event_q[evenq].even_loc;
+                        *event_q[evenq].evd_prg=NULL;  
+                                                /* Event off */
+                        ev_onst->e_polar=NULL;          /* [034] */
+                        *event_q[evenq].evt_fst=NULL;   /* [034] */
+                        bcdload(ev_onst->e_look,onsetd.o_look,2); 
+                                                        /* [018] */
+                        bcdload(ev_onst->e_year,onsetd.o_year,2);
+                        bcdload(ev_onst->e_days,onsetd.o_days,4);
+                        bcdload(ev_onst->e_hours,onsetd.o_hours,2);
+                        bcdload(ev_onst->e_mins,onsetd.o_mins,2);
+                        bcdload(ev_onst->e_secs,onsetd.o_secs,2);
+                        bcdload(ev_onst->e_msecs,onsetd.o_msecs*10,4);
+                        bcdload(ev_onst->e_amps,onsetd.o_amps,6);
+                        bcdload(ev_onst->e_pl,onsetd.o_pl,2);
+                        bcdload(ev_onst->e_pr,onsetd.o_pr/10,4);
+                        bcdload(ev_onst->e_large,onsetd.o_large,4);
+
+#define tsn onsetd.o_snr
+
+                        bcdload(ev_onst->e_snr, \
+                             tsn[4]+(tsn[3]*10L)+(tsn[2]*100L)+ \
+                                (tsn[1]*1000L)+(tsn[0]*10000L),6)
+                                        /* [019] Use long constants */
+
+                        ev_onst->e_polar=onsetd.o_polar;
+                                
+                }
+                if (evenstat) *event_q[evenq].evd_on=0xFF;
+                else *event_q[evenq].evd_on=NULL;
+
+                ovptr=(*(event_q[evenq].edptr));        /* [037]+++ */
+                ovptr+=MBOFF;
+                if (ovptr!=evptr) {
+                        p_warn("Event detector queue resyncronised.");
+                        p_crlf();
+                } else                                  /* [037]--- */
+                        *event_q[evenq].edptr=NULL;     /* [039] */
+                evt_ons++;
+                RETURN(TRUE);
+        }
+
+
+        RETURN(FALSE);
+
+}
+/*----------------------------------------------------------------------*
+ *      Function: VOID tapeout(inbufp) - write a buffer out to tape     *
+ *----------------------------------------------------------------------*
+ *      Assure that a tapedrive is up, then write the tape buffer       *
+ *      on out via standard tape subroutines in CS3MIO.  Try to do      *
+ *      the appropriate thing given certain flag and error conditions.  *
+ *      Very specifically be sure to terminate tape at the right time.  *
+ *----------------------------------------------------------------------*
+ *      Arguments:      inbufp is a pointer to the data to write        *
+ *----------------------------------------------------------------------*/
+
+VOID tapeout(inbufp)
+BYTE *inbufp;
+{
+
+        TRACER("tapeout");
+
+        FOREVER {
+
+                star_timer(WAITTP_TIMER);
+                gettape();
+                end_timer(WAITTP_TIMER);
+
+                star_timer(WRTTAP_TIMER);
+                wrt_blk(tapdrv[drive],inbufp,DBF_SIZ);
+                end_timer(WRTTAP_TIMER);
+
+                if (taperr==0&&tapsts&ST_WTP) {
+                        p_warn("Tape drive is write locked ");
+                        _hold_er=TRUE;
+                        break;
+                }
+
+                if (taperr==0&&tapsts&ST_EDT) {
+                        p_warn("End recording on current tape ");
+                        break;
+                }
+
+                if (taperr!=0) {
+                        p_warn("Tape I/O error - abort tape ");
+                        _hold_er=TRUE;
+                        break;
+                }
+
+                RETURN_VOID;
+
+        }
+
+        offtape();
+        RETURN_VOID;
+
+}
+/*----------------------------------------------------------------------*
+ *      Function: VOID gettape() - Look for a viable tape drive         *
+ *----------------------------------------------------------------------*
+ *      Loop through the list of viable tape drives, and open the       * 
+ *      first which is ready.  Note that we will sit in this loop       * 
+ *      forever until we get an acceptable tape drive.  If we already   *
+ *      have a good tape drive, we will sit here and use this one.      *
+ *----------------------------------------------------------------------*
+ *      Arguments:      No arguments                                    *
+ *----------------------------------------------------------------------*/
+
+VOID gettape()
+{
+
+        INT16 alwarn[DRIVES],i;
+
+        TRACER("gettape");
+
+        for(i=0;i<DRIVES;i++) alwarn[i]=FALSE;
+
+        if (tapdrv[drive]!=NULL) RETURN_VOID;   /* Already got one */
+
+        FOREVER {
+
+                if (drive>=DRIVES) drive=0;     /* Start at head of list */
+        
+                if (alwarn[drive]) _hold_er=TRUE;
+                tapdrv[drive]=tape_open(drive);
+                _hold_er=FALSE;
+                if (tapdrv[drive]!=NULL) {
+/*******Temporary test measure to assure that off line detectors synced*****/
+                        detcon[0]->sam_sec=0;
+                        detcon[1]->sam_sec=0;
+/***************************************************************************/
+                        station_id();
+                        p_warn("Begin recording on tape drive #");
+                        p_numout(drive,10);
+                        p_crlf();
+                        g_time(&tapdrv[drive]->_begtim);
+                        for (i=0; i<MAXWQ; i++) wrt_lst[i].recprt=0;
+                        RETURN_VOID;            /* [013] please return */
+                }
+                if (!alwarn[drive]) {
+                        p_warn("Cannot open tape drive #");
+                        p_numout(drive,10);
+                        p_crlf();
+                        alwarn[drive]=TRUE;
+                }
+                drive++;
+
+        }
+
+        RETURN_VOID;
+
+}
+/*----------------------------------------------------------------------*
+ *      Function: VOID offtape() - Terminate current tape               *
+ *----------------------------------------------------------------------*
+ *      Write 3 tape marks to current tape, and then unload it.         *
+ *      Print the start and end time of the tape, and a summary         *
+ *      of the record counts written (even if there was errors)         *
+ *----------------------------------------------------------------------*
+ *      Arguments:      There are no arguments                          *
+ *----------------------------------------------------------------------*/
+
+VOID offtape()
+{
+
+        struct r_time offtim;
+        INT16 i;
+        INT32 rcsum;
+
+        TRACER("offtape");
+
+        if (tapdrv[drive]==NULL) RETURN_VOID;   /* No work to do */
+
+        p_disp("-- 3M records written: ");
+        p_lngout(tapdrv[drive]->_recnt,10);     /* [020] This is now a long */
+        if (tapdrv[drive]->_wrter>0) {
+                p_cont();
+                p_disp("Bad Records: ");
+                p_numout(tapdrv[drive]->_wrter,10);
+        }
+
+        g_time(&offtim);                        /* [030] +++ */
+        p_cont();
+        p_disp("Tape Started: ");
+        p_time(&tapdrv[drive]->_begtim);
+        p_disp(" Tape Ended: ");
+        p_time(&offtim);
+        p_cont();
+
+        rcsum=0;
+        p_disp("Data Records --");
+        for (i=0; i<MAXWQ; i++) {
+                p_disp(" ");
+                p_disp(wrt_lst[i].bufnam); p_disp(":");
+                p_numout(wrt_lst[i].recprt,10);
+                rcsum+=(INT32) wrt_lst[i].recprt;
+        }
+        p_disp(" Total:");
+        p_numout(rcsum,10);                     /* [030] --- */
+
+#ifdef ERRSTAT
+        if (tapdrv[drive]->_datcom!=0||
+            tapdrv[drive]->_keycom!=0||
+            tapdrv[drive]->_framer!=0) {
+                p_cont();
+                if (tapdrv[drive]->_datcom!=0) {
+                        p_disp("Data Compare Errors: ");
+                        p_numout(tapdrv[drive]->_datcom,10);
+                        p_disp(" ");
+                }
+                if (tapdrv[drive]->_keycom!=0) {
+                        p_disp("Key Compare Errors: ");
+                        p_numout(tapdrv[drive]->_keycom,10);
+                        p_disp(" ");
+                }
+                if (tapdrv[drive]->_framer!=0) {
+                        p_disp("Frame Errors: ");
+                        p_numout(tapdrv[drive]->_framer,10);
+                }
+        }
+#endif
+        p_crlf();
+
+        _hold_er=TRUE;          /* Turn off further error messages */
+
+        tap_mark(tapdrv[drive]);
+        tap_mark(tapdrv[drive]);
+        tap_mark(tapdrv[drive]);
+
+        clos_tap(tapdrv[drive]);
+
+        tapdrv[drive]=NULL;
+
+#ifdef TIME_TRACK
+        dump_timer();
+#endif
+
+        p_disp("\n\n\n\n\n\r"); 
+        p_disp("- - - - - - - - - - Cut Log Here and Submit with Tape");
+        column=0;
+        p_disp(" - - - - - - - - - -");
+        p_disp("\n\n\n\n\n\n\r");
+
+        _hold_er=FALSE;
+        drive++;
+        if (drive>=DRIVES) drive=0;
+        for (i=0; i<DRIVES; i++) tapdrv[i]=NULL;        /* Get em all */
+
+        RETURN_VOID;
+
+}
+\end{verbatim}
+\begin{verbatim}
+/*----------------------------------------------------------------------*
+ *      Function: VOID housekeep() - perform periodic housekeeping      *
+ *----------------------------------------------------------------------*
+ *      Periodically check for communications from the event detector   *
+ *      parameter registers in the mailboxes.                           *
+ *----------------------------------------------------------------------*
+ *      Arguments:      There are no arguments                          *
+ *----------------------------------------------------------------------*/
+
+VOID housekeep()
+{
+
+        WORD trevn;
+        BYTE drvnm;
+        CONTEXT *evenptr;
+        struct detpar *evpar;
+        WORD helico,any;
+        INT16 t_filhi,t_fillo,t_iwin,t_xth1,t_xth2,t_xth3,t_xthx,t_n_hits;
+                                                                /* [021] */
+
+        TRACER("housekeep");
+
+        any=0;
+        houkps++;
+
+        if (*curabo) {                  /* [006] Unload this tape */
+                p_warn("Operator aborted current tape ");
+                offtape();
+                *curabo=NULL;
+        }
+
+        if (*unlotd) {
+                drvnm=((*unlotd)>>8)&0xFF;      /* [006] unload this drive */
+                if (drvnm==drive) {
+                        p_warn("Operator aborted current tape ");
+                        offtape();
+                } else 
+                        if (drvnm<DRIVES) {
+                                tapdrv[drvnm]=tape_open(drvnm);
+                                if (tapdrv[drvnm]!=NULL) {      /* [007] */
+                                        p_warn("Tape drive ");
+                                        p_numout(drvnm,10);
+                                        p_disp(" dismounted by operator\n\r");
+                                        clos_tap(tapdrv[drvnm]);
+                                }
+                        }
+                *unlotd=NULL;
+        }
+                
+#ifdef HELICOMON
+        helico = *daccha&0xFF;
+        if (helico!=dacmon) {
+                p_warn("Helicorder (DAC) is now monitoring ");
+                if (helico>CHANQUAN) {
+                        p_disp("illegal value: ");
+                        p_number(helico&0xFFFF,16,4,TRUE);
+                /*      *daccha=0;      *//* Make it monitor SP */
+                } else {
+                        p_disp("channel ");
+                        p_disp(detnam[helico]);
+                }
+                dacmon = helico;
+                p_crlf();
+        }
+#endif
+
+#define BCDD0(x) (x&0xF)
+#define BCDD1(x) ((x>>4)&0xF)
+#define BCDD2(x) ((x>>8)&0xF)
+
+                evpar=event_q[0].dpr_loc;
+
+#ifdef DETDEF
+        if (evpar->d_filhi==0) {                /* Fill out defaults */
+                evpar->d_filhi=SPFHI;
+                evpar->d_fillo=SPFLO;
+                evpar->d_iwin=SPIWN;
+                evpar->d_xth1=SPXT1;
+                evpar->d_xth2=SPXT2;
+                evpar->d_xth3=SPXT3;
+                evpar->d_xthx=SPXTX;
+                *sp_n_hits=SPNHT;
+
+                evpar=event_q[1].dpr_loc;
+                evpar->d_filhi=BBFHI;
+                evpar->d_fillo=BBFLO;
+                evpar->d_iwin=BBIWN;
+                evpar->d_xth1=BBXT1;
+                evpar->d_xth2=BBXT2;
+                evpar->d_xth3=BBXT3;
+                evpar->d_xthx=BBXTX;
+                *bb_n_hits=BBNHT;
+        }
+#endif
+
+        for (trevn=0; trevn<EVQUE; trevn++) {
+
+                evenptr=detcon[trevn];
+                evpar=event_q[trevn].dpr_loc;
+
+                t_filhi=BCDD0(evpar->d_filhi);          /* [021] ++++++ */
+                t_filhi+=BCDD1(evpar->d_filhi)*10;
+                t_filhi+=BCDD2(evpar->d_filhi)*100;
+
+                t_fillo=BCDD0(evpar->d_fillo);
+                t_fillo+=BCDD1(evpar->d_fillo)*10;
+                t_fillo+=BCDD2(evpar->d_fillo)*100;
+
+                t_iwin=BCDD0(evpar->d_iwin);
+                t_iwin+=BCDD1(evpar->d_iwin)*10;
+                t_iwin+=BCDD2(evpar->d_iwin)*100;
+
+                t_xth1=BCDD0(evpar->d_xth1);
+                t_xth1+=BCDD1(evpar->d_xth1)*8;
+                t_xth1+=BCDD2(evpar->d_xth1)*64;
+
+                t_xth2=BCDD0(evpar->d_xth2);
+                t_xth2+=BCDD1(evpar->d_xth2)*8;
+                t_xth2+=BCDD2(evpar->d_xth2)*64;
+
+                t_xth3=BCDD0(evpar->d_xth3);
+                t_xth3+=BCDD1(evpar->d_xth3)*8;
+                t_xth3+=BCDD2(evpar->d_xth3)*64;
+
+                t_xthx=BCDD0(evpar->d_xthx);
+                t_xthx+=BCDD1(evpar->d_xthx)*8;
+                t_xthx+=BCDD2(evpar->d_xthx)*64;
+
+                if (trevn==0) {
+                        t_n_hits=BCDD0(*sp_n_hits);
+                        t_n_hits+=BCDD1(*sp_n_hits)*10;
+                        t_n_hits+=BCDD2(*sp_n_hits)*100;
+                } else {
+                        t_n_hits=BCDD0(*bb_n_hits);
+                        t_n_hits+=BCDD1(*bb_n_hits)*10;
+                        t_n_hits+=BCDD2(*bb_n_hits)*100;
+                }
+
+#ifdef RULES                    /* [032] */
+                FOREVER {
+                        if (t_xth3>=t_xth2||
+                            t_xth2>=t_xth1) {
+                   p_warn("Rule is xth1>xth2>xth3 - setting to defaults");
+                                p_crlf();
+                                t_xth1=t_xth2=t_xth3=-1;
+                                any++;
+                                break;
+                        }                       
+                        if (t_xthx<014) {               /* Its octal eh? */
+                        p_warn("xthx must be >= 14 - setting to defaults");
+                                p_crlf();
+                                t_xthx=-1;
+                                any++;
+                                break;
+                        }                       
+                        if (t_xthx>0177) {              /* Its octal eh? */
+                        p_warn("xthx must be <= 177 - setting to defaults");
+                                p_crlf();
+                                t_xthx=-1;
+                                any++;
+                                break;
+                        }                       
+                        if (t_xth1>0277) {              /* Its octal eh? */
+                        p_warn("xth1 must be <= 277 - setting to default");
+                                p_crlf();
+                                t_xth1=-1;
+                                any++;
+                                break;
+                        }                       
+                                if (t_xth1<010) {       /* Its octal eh? */
+                        p_warn("xth1 must be >= 10 - setting to default");
+                                p_crlf();
+                                t_xth1=-1;
+                                any++;
+                                break;
+                        }                       
+                        if (t_xth2>177) {               /* Its octal eh? */
+                        p_warn("xth2 must be <= 177 - setting to defaults");
+                                p_crlf();
+                                t_xth2=-1;
+                                any++;
+                                break;
+                        }                       
+                        if (t_xth2<07) {                /* Its octal eh? */
+                        p_warn("xth2 must be >= 7 - setting to defaults");
+                                p_crlf();
+                                t_xth3=-1;
+                                any++;
+                                break;
+                        }                       
+                        if (t_xth3>0100) {              /* Its octal eh? */
+                        p_warn("xth3 must be <= 100 - setting to defaults");
+                                p_crlf();
+                                t_xth3=-1;
+                                any++;
+                                break;
+                        }                       
+                        if (t_filhi>=t_fillo||
+                            t_fillo>=t_iwin) {
+                   p_warn("Rule is iwin>fillo>filhi - setting to defaults");
+                                p_crlf();
+                                t_filhi=t_fillo=t_iwin=-1;
+                                any++;
+                                break;
+                        }                       
+                        break;
+                }
+#endif
+
+                if (trevn==0) {
+                        if (t_filhi==-1) evpar->d_filhi=SPFHI;
+                        if (t_fillo==-1) evpar->d_fillo=SPFLO;
+                        if (t_iwin==-1)  evpar->d_iwin=SPIWN;
+                        if (t_xth1==-1)  evpar->d_xth1=SPXT1;
+                        if (t_xth2==-1)  evpar->d_xth2=SPXT2;
+                        if (t_xth3==-1)  evpar->d_xth3=SPXT3;
+                        if (t_xthx==-1)  evpar->d_xthx=SPXTX;
+                        if (t_n_hits==-1) *sp_n_hits=SPNHT;
+                }
+
+                if (trevn==1) {
+                        if (t_filhi==-1) evpar->d_filhi=BBFHI;
+                        if (t_fillo==-1) evpar->d_fillo=BBFLO;
+                        if (t_iwin==-1)  evpar->d_iwin=BBIWN;
+                        if (t_xth1==-1)  evpar->d_xth1=BBXT1;
+                        if (t_xth2==-1)  evpar->d_xth2=BBXT2;
+                        if (t_xth3==-1)  evpar->d_xth3=BBXT3;
+                        if (t_xthx==-1)  evpar->d_xthx=BBXTX;
+                        if (t_n_hits==-1) *bb_n_hits=BBNHT;
+                }
+                
+                if((!any)&&
+                   (evenptr->filhi!=t_filhi||
+                    evenptr->fillo!=t_fillo||
+                    evenptr->iwin!=t_iwin||
+                    evenptr->xth1!=t_xth1||
+                    evenptr->xth2!=t_xth2||
+                    evenptr->xth3!=t_xth3||
+                    evenptr->xthx!=t_xthx||
+                    evenptr->n_hits!=t_n_hits)) {
+
+                        evenptr->ch_name=event_q[trevn].detnam; /* Load name*/
+                        evenptr->filhi=t_filhi;
+                        evenptr->fillo=t_fillo;
+                        evenptr->iwin=t_iwin;
+                        evenptr->xth1=t_xth1;
+                        evenptr->xth2=t_xth2;
+                        evenptr->xth3=t_xth3;
+                        evenptr->xthx=t_xthx;           /* [021] ------- */
+                        evenptr->n_hits=t_n_hits;       /* [024] */
+
+                        evenptr->sam_sec=0;     /* Force a reset */
+
+                }
+
+        }
+
+        actlop=idllop=0;        /* Reset housekeeping registers */
+
+        RETURN_VOID;
+
+}
+/*----------------------------------------------------------------------*
+ *      Function: VOID bcdcvt(inlng) - Convert a long into bcd          *
+ *----------------------------------------------------------------------*
+ *      Convert inlng into n bcd numbers - First must convert into      *
+ *      decimal, then do the packing                                    *
+ *----------------------------------------------------------------------*
+ *      Arguments:      DWORD inlng - Input number to convert           *
+ *----------------------------------------------------------------------*/
+
+VOID bcdcvt(inlng)
+DWORD inlng;
+{
+
+        register BYTE rem;
+        INT16 cptr,i;
+        BYTE decans[12];
+        DWORD acfas;
+
+        TRACER("bcdcvt");
+
+        for(i=0;i<6;i++) bcdbuf[i]=0;
+        for(i=0;i<12;i++) decans[i]=0;
+
+        cptr=0;
+
+        while (inlng>0) {       /* [015] Make simpler */
+                acfas=inlng/10L;
+                rem=(BYTE) (inlng-(acfas*10));
+                                /* There is no long rem func % here */
+                decans[cptr++]|=rem;
+                inlng=acfas;
+        }
+
+        for (i=0; i<12; i+=2) {
+                cptr=5-(i/2);
+                bcdbuf[cptr]+=decans[i+1]<<4;
+                bcdbuf[cptr]+=decans[i];
+        }
+
+        RETURN_VOID;
+
+}
+/*----------------------------------------------------------------------*
+ *      Function: VOID snooze() - Loop for SLEP_T loops                 *
+ *----------------------------------------------------------------------*
+ *      Wait for time so that dual port memory will be available.       *
+ *      Keeps from getting into races with other processors.            *
+ *----------------------------------------------------------------------*/
+
+VOID snooze()
+{
+
+        register INT16 looper;
+
+        TRACER("snooze");
+
+        for (looper=0; looper<SLEP_T; looper++);
+
+        RETURN_VOID;
+}
+\end{verbatim}

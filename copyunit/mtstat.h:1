@@ -1,0 +1,15 @@
+/*	Public accessable flags on mag tape */
+
+#define MTE_OK	0
+#define MTE_EOF -1		/* File mark seen */
+#define MTE_DNS -2		/* Device not selected */
+#define MTE_OPN -3		/* Drive not opened */
+#define MTE_WPT -4		/* Tape write protected */
+#define MTE_EOT -5		/* EOT seen, record not written */
+
+#define MTS_OPN	0x0001		/* Drive not open */
+#define MTS_EOT 0x0002		/* Drive at EOT */
+#define MTS_BOT 0x0004		/* Drive at BOT */
+#define MTS_FPT 0x0008		/* Drive now write protected */
+#define MTS_OFL 0x0010		/* Drive is off line */
+

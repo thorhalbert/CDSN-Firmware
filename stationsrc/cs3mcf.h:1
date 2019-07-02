@@ -1,0 +1,60 @@
+/*----------------------------------------------------------------------*
+ *  C h i n a   D i g i t a l   S e i s m o g r a p h   N e t w o r k	*
+ *     iSBC 86/14 - Project Recorder Handling and Event Detection	*
+ *----------------------------------------------------------------------*
+ *	CS3MCF.H - Configuration constants for current 3M tape drive	*
+ *	subsystem.  Modify for current installation.			*
+ *----------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------*
+ *	This software was written by Scott Halbert for the Albuquerque	*
+ *	Seismological Laboratory (US Geological Survey).		*
+ *----------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------*
+ *	Modification and history of CDSN3M.C				*
+ *									*
+ *-----Edit---Date----Who-------Description of changes------------------*
+ *	001 29-Aug-85 SH	Do Documentation			*
+ *----------------------------------------------------------------------*/
+
+/*----------------Configure port locations for iSBC 86/14/30----------------*/
+
+#define SBX_CMX 2		/* Number of SBX connectors */
+#define DRIVES 2		/* Number of physical drives */
+
+#ifdef _tapdef
+struct {				/* Structure of port locations */
+	BYTE __upi_s,__drv_s,__data;
+} __portl[SBX_CMX] = {
+	{ 0xA2, 0xA0, 0xB0 },		/* SBX port J3 configuration */
+	{ 0x82, 0x80, 0x90 } };		/* SBX port J4 configuration */
+
+struct {
+	BYTE d_port;		/* The SBX port of drive */
+	BYTE d_unit;		/* The unit designation of drive */
+}  drvarr[DRIVES] = {
+	{ 1, 0 },		/* Drive 0 is port 1 unit 0 */
+	{ 1, 1 } } ;		/* Drive 1 is port 1 unit 1 */
+
+TAPE drviov[DRIVES] = {0};	/* IOV array for drives */
+
+#endif
+
+/*-------------Configure parallel port (PPI) for iSBC 86/14/30-------------*/
+
+/*----------------------------------------------------------------------*
+ *	The interface for the HCD-75 interface does not indicate	*
+ *	when the next buffer is avilable.  However when the OPT1	*
+ *	on the SBX slot (with the tape controller in it), is high,	*
+ *	the host can transfer the next byte to or from the iSBX 217B	*
+ *	board.  If this line is on the parallel port on the host, this	*
+ *	signal can be polled.    (See section 3.5.4 page 3-17 in the	*
+ *	iSBX 217B book)							*
+ *----------------------------------------------------------------------*/
+
+#define PPI_CMR  0xCE		/* PPI control port (WO) */
+#define PPI_PRT  0xCA		/* PPI port where OPT1 lines of iSBX is */
+
+static WORD opt_lin[SBX_CMX] = { 0x02, 0x01 };
+				/* Bits on PPI where OPT1 lines are */

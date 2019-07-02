@@ -1,0 +1,1664 @@
+/*----------------------------------------------------------------------*
+ *  C h i n a   D i g i t a l   S e i s m o g r a p h   N e t w o r k	*
+ *									*
+ *	CSEVDT.C - Seismic Event Detection Algorithm			*
+ *									*
+ *	The event detector analyses seismic records and scans for	*
+ *	onset of event, and estimates direction of first break,		*
+ *	quality of onset, period and maximum amplitude of the signal	*
+ *	and an estimate of the variability of the background noise.	*
+ *----------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------*
+ *	This algorithm was described by Murdock and Hutt in the USGS 	*
+ *	Open File Report 83-785. The C implementation closely parallels *
+ *	that of the FORTRAN discussed by them.				*
+ *									*
+ *		C language implementation by James N. Murdock		*
+ *		 and Scott Halbert, and with cooperation of		*
+ *		 John Mcdermot and Charles R. Hutt.  			*
+ *									*
+ * 	Questions or comments should be addressed to:			*
+ *				James N. Murdock			*
+ *				Albuquerque Seis. Lab.			*
+ *				Bldg. 10002, KAFB-E			*
+ *				Albuquerque N.M. 87115			*
+ *				(505) 844 4637				*
+ *----------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------*
+ *	Modification and history of CSEVDT.C				*
+ *									*
+ *-----Edit---Date----Who-------Description of changes------------------*
+ *	001 12-Jul-85 JNM	Convert from driver2.c for 8086		*
+ *	002 30-Jul-85 SH	Make portable - insert in CDSN system	*
+ *	003  1-Aug-85 SH	Make leap year calc more accurate, take	*
+ *				 10s place of year into account, and	*
+ *				 use new macros for decoding header	*
+ *				 from sensor records			*
+ *	004  1-Aug-85 JNM	Remove hardcode for channel size, etc.	*
+ *	005  5-Aug-85 JNM	Make some context variables clearer	*
+ *      006 10-Sep-85 JNM	Make LDR a context variable		*
+ *				Repair default filter			*
+ *                               Make lst_amp a context variable	*
+ *	007 11-Sep-85 SH	Remove itrf because itc duplicates the	*
+ *				 info it held, add the code to make	*
+ *				 e_detect return a boolean for the tape	*
+ *				 write information, and add the ONSETI	*
+ *				 structure for onset data capture	*
+ *	008 12-Sep-85 JNM	Append routines for setting recording-	*
+ *				 time as a function of signal amplitude	*
+ *				 and number of detections/event.  These	*
+ *				 routines are rec_len and findl. They 	*
+ *				 are not yet implemented.		*
+ *	009 13-Nov-85 SH	We are using "time" as a pointer when	*
+ *				 it never was allocated, therefore	*
+ * 				 corrupts low memory - change to dot	*
+ *	010 19-Nov-85 SH/JNM	Put in counters and flags to observe	*
+ *				 from multi-bus for debugging while	*
+ *				 in circuit				*
+ *	011 20-Nov-85 SH/JNM	The error has been narrowed down to	*
+ *				 the area between indat and before	*
+ *				 p_one (did not get called), so		*
+ *				 could be in indat, dum_out, or the	*
+ *				 filters...  Add more test variables	*
+ *	012 20-Nov-85 SH	Program dies in indat...  indat itself	*
+ *				 does not seem to be culprit, rewrite	*
+ *				 indat not to use pointers and hope	*
+ *				 error moves or disapears		*
+ *	013  9-Dec-85 JNM	Change sam_rec to sam_ch in onset	*
+ *	014 17-Dec-85 JNM	Fix bug in indat()			*
+ *	015 27-Jan-86 SH	Make ch_name a pointer, not a storage	*
+ *	016  3-Feb-86 SH	Do event message for debugging		*
+ *	017  6-Feb-86 JNM	Compensate for fractional seconds in	*
+ *				 packet length to get correct onset 	*
+ *				 time in time_f()			*
+ *	018  6-Feb-86 SH	Forgot to put lookback in return data	*
+ *	019 10-Feb-86 JNM	time_f() fails to calculate the correct	*
+ *				 onset time if there is a negative	*
+ *				 time correction.  Rewritten routine.	*
+ *	020 12-Feb-86 JNM	nn was not getting reset in i_bingo	*
+ *				 causing the actual retrigger time 	*
+ *				 to float around causing false alarms	*
+ *	021 14-Feb-86 SH	When the onset PT has one point in one	*
+ *				 record and the other in the next, 	*
+ *				 the time will be off +1 record, add 	*
+ *				 code to track record number with the	*
+ *				 sample timing so that errors like this	*
+ *				 can be handled automatically, also	*
+ *				 simplifies finding onset when it is in	*
+ *				 the previous record.			*
+ *				This version (V2.0) went to China on	*
+ *				 18-Feb-86, next edit to be V2.1	*
+ *	022 12-Mar-86 SH	N_HITS becomes a context variable in	*
+ *				 an attempt to adjust performance to	*
+ *				 reduce false alarms in the china BB	*
+ *				 channels due to high amplitute low	*
+ *				 frequency background			*
+ *	023 18-Mar-86 JNM	Set index to a particular value so that	*
+ *				 online and offline detectors will sync	*
+ *	024 19-Mar-86 JNM	Add two more bits precision in xth()	*
+ *	025  7-Apr-86 JNM/SH	Several modifications to allow correct	*
+ *				 calculations during pathological 	*
+ *				 conditions - remove main(), enter new	*
+ *				 routine to better calculate long 	*
+ *				 time periods				*
+ *	026  7-Apr-86 JNM	Add variables to remove hard coded 	*
+ *				 sizes and other constants		*
+ *	027 11-Apr-86 SH	Offline detectors don't sync to each	*
+ *				 other, make temporary change to	*
+ *				 onset to fix this (theoretically)	*
+ *	028 14-Apr-86 SH	Offline detector still doesn't sync	*
+ *				 variable thresholds need to be set	*
+ *				 also when onset syncs things		*
+ *	029 10-Jun-86 SH	Version 2.1[28] went to china, so	*
+ *				 this is V2.2, we are still debugging	*
+ *				 some minor tracking probems		*
+ *	030  5-Aug-86 SH	Tracking problems all traced to a 	*
+ *				 timing problem in main program which	*
+ *				 ocassionally (once or twice on a	*
+ *			 	 continuous tape) would not call the	*
+ *				 detector, and would thereby not stay	*
+ *				 in sync. 
+ *				Jim found a small translation error in	*
+ *				 the fortran to C version, which made	*
+ *				 a switch in the sense of an if 	*
+ *	031  5-Aug-86 SH	Clean up the debugging messages and 	*
+ *				 some of the resync stuff since it	*
+ *				 is no longer needed.			*
+ *----------------------------------------------------------------------*/
+
+char *csevdt = "csevdt V2.2[031]";	/* version number */
+
+#ifdef UNIX
+#include <stdio.h>
+#include <sys/types.h>
+#include <sys/file.h>
+#include "csstnd.h"
+#include "csfilt.h"
+#include "cscont.h"
+#include "cssepk.h"
+#undef void
+#else
+
+#include "src:csstnd.h"		/* CDSN standard definitions */
+#include "src:csfilt.h"		/* Filters and definitions */
+#include "src:cscont.h"		/* Structure and ext variables (context) */
+#include "src:cssepk.h"		/* Input Sensor Packet definitions */
+
+#endif
+
+#define absval(inval) (((inval)>=0)? (inval):-(inval))
+
+struct r_time time = {0};
+
+	/* external values are zeroed for a foreign compiler */
+
+INT16 r_cnt[6] = {4,15,30,44,59,73}; /*[008] "records"/level */
+INT16 sam_no = 0;	/*the number of the current seismic sample*/
+INT16 thf = 0;		/*flag, = 1 if > th2, = 2 if > th1 -- event*/
+INT32 fil_out = 0L;	/*output of the seismic data filter -- filter*/
+INT32 data[MAX_SAM + LDM + 2]={0}; /* the data buffer, needed for filter */
+				/* 06 */
+/*	Various counters for debugging in the 86/14	*/
+
+#ifdef EVD_CTS		/* [010] */
+
+BOOL	in_event = FALSE;	/* TRUE if processing is occurring in event */
+DWORD	k_e_detect = 0;		/* counts calls to e_detect -- e_detect */
+DWORD	k_pass1 = 0;		/* counts calls to pass_one -- pass_one */
+DWORD	k_indat = 0;		/* counts calls to indat, expeced=k_detect
+							 -- indat */
+DWORD	k_p_one = 0;		/* counts calls to p_one, expected =
+					e_detect * SAM_REC -- p_one */
+DWORD	k_p_two = 0;		/* counts calls to p_two, expected = 
+					~ 1/20 k_p_one -- p_two */
+DWORD	k_event = 0;		/* counts calls to k_event, expected =
+					~ 1/4 k_p_one -- event */
+DWORD	k_ibingo = 0;		/* counts number of detections -- ibingo */
+DWORD	k_onsetq = 0;		/* counts calls to onsetq -- onsetq */
+DWORD	k2_onset = 0;		/* counts calls to onset -- onset.  If
+					in_e_detect=FALSE, expect k_ibingo =
+					k_onsetq = k2_onset < k_event */
+DWORD	k_reclen = 0;		/* counts calls to rec_len, if implemented
+					expect = k_onset */
+	/* Editing as of [011] */
+DWORD	k_filin = 0;		/* How many times did we enter filters */
+DWORD	k_filout = 0;		/* How many times did we exit */
+DWORD	k_dumout = 0;		/* How many times has dumout been called */
+BOOL	in_indat = FALSE;	/* Are we still in indat? */
+BOOL	in_dumout = FALSE;	/* Are we still in dumout? */
+WORD	k_filtyp = 0;		/* Which filter are we in? */
+
+#endif
+
+BOOL	in_e_detect = FALSE;	/* TRUE if within e_detect */
+
+   /* Declarations added to comply with objections of Whitesmith linker */
+
+INT16 p_rval = 0;      /* decimal value of period--period*/
+INT16 p_lval = 0;      /* integer value of period--period*/
+INT16 t_rval = 0;      /* decimal value of onset time --time_f*/
+/*----------------------------------------------------------------------*
+ *	Function: BOOL e_detect(input,con_ptr,offset,onsetdata) - Event	*
+ *			detect a data record				*
+ *----------------------------------------------------------------------*
+ *	e_detect is the main driver for the event detect algorithm	*	
+ *----------------------------------------------------------------------*
+ *	Arguments:	struct rec_str *input - pointer to the input	*
+ *				data buffer				*
+ *			CONTEXT *con_ptr - pointer to the context	*
+ *				info (data from the previous run)	*
+ *			INT16 offset - which channel in set is to	*
+ *				be used (offset into set)		*
+ *			ONSETI *onsetdata - contains the onset info for	*
+ *				the last (only) onset to happen on this	*
+ *				record.  If new_onset is FALSE, there	*
+ *				were no onsets in this record. [007]	*
+ *----------------------------------------------------------------------*
+ *	Returns:	TRUE - Please write tape for this data		*
+ *			FALSE - Don't write tape for this data		*
+ *----------------------------------------------------------------------*
+ *	Fatal Errors:	This routine does not have fatal exits		*
+ *----------------------------------------------------------------------*/
+
+BOOL e_detect(input,con_ptr,offset,onsetdata)
+struct rec_str *input;
+CONTEXT *con_ptr;
+INT16 offset;
+ONSETI *onsetdata;
+{
+
+	register INT32 *ldp;
+	INT16 ck_sam_r;
+	BOOL tapewrite;
+
+	in_e_detect = TRUE;
+#ifdef EVD_CTS	/* [010] */
+	k_e_detect++;
+#endif
+
+/*--------the first ldr values of data are from last record, see indat------*/
+
+	con_ptr->cur_rec++;				     /* [021] +++ */
+	if (con_ptr->cur_rec>=CUR_MAX) con_ptr->cur_rec=0;   /* [021] --- */
+
+	tapewrite=FALSE;
+	onsetdata->new_onset=FALSE;
+
+	ldp = &data[LDM];			/*  [006] */
+
+/*--------Flow of program is controlled by sample rate in byte 17 of header-*/
+
+	ck_sam_r = (samr1(input)*10)+samr0(input);		/* [002] */
+
+	if(ck_sam_r != con_ptr->sam_sec) {
+		con_ptr->sam_sec = ck_sam_r;
+		pass_one(con_ptr,input,offset);
+	}
+
+	indat(input,con_ptr);
+
+	for(sam_no = 0;sam_no < con_ptr->sam_ch;sam_no++) {
+		if(con_ptr->itc) {
+			dum_out(con_ptr);
+			tapewrite=TRUE;
+		}
+#ifdef EVD_CTS		/* [011] */
+		k_filin++;
+		k_filtyp = con_ptr->sam_sec;
+#endif
+		switch(con_ptr->sam_sec) {
+			case 20:
+#ifdef OLD20SPSF
+				fil_out = (f1b20a(ldp)) bSH_20; /* [011] */
+#else
+				fil_out  = f1c20a(ldp);
+				fil_out += f1c20b(ldp);
+				fil_out += f1c20c(ldp);
+				fil_out += f1c20d(ldp);
+				fil_out += f1c20e(ldp);
+				fil_out += f1c20f(ldp);
+				fil_out  = fil_out cSH_20;
+#endif
+				ldp++;
+				break;
+			case 40:
+#ifdef OLD40SPSF
+				fil_out  = f1a40a(ldp);
+				fil_out += f1a40b(ldp);
+				fil_out += f1a40c(ldp);
+				fil_out += f1a40d(ldp);
+				fil_out += f1a40e(ldp);
+				fil_out = fil_out aSH_40;
+#else
+				fil_out  = f1b40a(ldp);
+				fil_out += f1b40b(ldp);
+				fil_out += f1b40c(ldp);
+				fil_out += f1b40d(ldp);
+				fil_out = fil_out bSH_40;
+#endif
+				ldp++;
+				break;
+			case 80:
+				fil_out  = f1a80a(ldp);
+				fil_out += f1a80b(ldp);
+				fil_out += f1a80c(ldp);
+				fil_out += f1a80d(ldp);
+				fil_out += f1a80e(ldp);
+				fil_out += f1a80f(ldp);
+				fil_out += f1a80g(ldp);
+				fil_out += f1a80h(ldp);
+				fil_out += f1a80i(ldp);
+				fil_out += f1a80j(ldp);
+				fil_out += f1a80k(ldp);
+				fil_out += f1a80l(ldp);
+				fil_out = fil_out aSH_80;
+				ldp++;
+				break;
+			default:
+				fil_out = fil_def(ldp)SHFT_DEF;
+				ldp++;			/*[006]*/
+			}
+#ifdef EVD_CTS /* [011] */
+		k_filout++;
+#endif
+		
+		if(p_one(con_ptr) && event(con_ptr)) onsetq(con_ptr,
+							onsetdata,input);
+#ifdef EVD_CTS	/* [010] */
+		in_event=FALSE;
+#endif
+	}
+
+	in_e_detect = FALSE;		/* [010] We hope */
+
+	return(tapewrite);
+}
+/*----------------------------------------------------------------------*
+ *	Function: VOID pass_one(con_ptr,input,offset) - 		*
+ *						Initialize context	*
+ *----------------------------------------------------------------------*
+ *	pass_one is called from e_detect if this is the first run,	*
+ *	or if important detector parameters have been changed (which	*
+ *	invalidate current context data).				*
+ *----------------------------------------------------------------------*
+ *	Arguments:	CONTEXT *con_ptr - pointer to the context	*
+ *				info (data from the previous run)	*
+ *			struct rec_str *input - pointer to the input	*
+ *				data buffer				*
+ *			INT16 offset - which channel in set is to	*
+ *				be used (offset into set)		*
+ *----------------------------------------------------------------------*
+ *	Returns:	VOIDs don't return anything			*
+ *----------------------------------------------------------------------*
+ *	Fatal Errors:	This routine does not have fatal exits		*
+ *----------------------------------------------------------------------*/
+
+VOID pass_one(con_ptr,input,offset)
+register CONTEXT *con_ptr;
+register struct rec_str *input;
+INT16 offset;
+{
+	INT16 buffer[7],i,channels;
+
+#ifdef EVD_CTS	/* [010] */
+	k_pass1++;
+#endif
+
+	con_ptr->last_x = 0;
+	con_ptr->rec_x = 0;			/* [021] */
+	con_ptr->sum_s_c = 0;
+	con_ptr->s_sum_sc = 0; 
+	con_ptr->evon = FALSE;
+	con_ptr->epf = FALSE;
+	con_ptr->fbp = 0;
+	con_ptr->index = 0; 
+						/* [026] itc not set here */
+
+/*    itc set to simulate writing records during initialization *
+ *    processing of the detector.					*/
+
+	con_ptr->kk = 0; 
+	con_ptr->jj = 0;
+/* prev_sin changed from TRUE 27 aug 85 */
+	con_ptr->prev_sin = 2;
+	con_ptr->s_amp = 600000L;
+	con_ptr->last_y = 0L; 
+	con_ptr->maxamp = 0L;
+	con_ptr->max_y = 0L;
+	con_ptr->th1 = 500000L; 
+	con_ptr->th2 = 500000L; 
+	con_ptr->th3 = 500000L;
+	con_ptr->twosd = 300000L; 
+	con_ptr->thx = con_ptr->twosd <<1;
+
+	for(i = 0;i < 16;i++) con_ptr->tsstak[i] = 1000000L;
+
+	for(i = 0;i < 4; i++) {
+		con_ptr->abuf_sc[i] = con_ptr->abuf_tim[i] = 0;
+		con_ptr->abuf_amp[i] = 0L;
+	}
+
+	for(i = 0;i < E_B; i++) {
+		con_ptr->buf_flg[i] = con_ptr->buf_sc[i] = 0;
+		con_ptr->buf_tim[i] = 0;
+		con_ptr->buf_amp[i] = 0L;
+	}
+	
+/*-------------Moved in from what used to be auto_i()----------------------*/
+
+	channels = chanl0(input);		/* Get channels from rec */
+	if (channels==0) channels = 1;		/* Default in case of ? */
+
+	con_ptr->ch_no = offset;				/* [004] */
+	con_ptr->no_ch = channels;				/* [004] */
+
+#ifdef SRO
+	con_ptr->sam_rec = 980;		/* They don't use the whole thing */
+	if (channels==3) con_ptr->sam_rec=960;
+#else
+	con_ptr->sam_rec = SAM_REC;	/* We can assume correct coding */
+#endif
+
+	con_ptr->sam_ch = con_ptr->sam_rec/con_ptr->no_ch;	/* [004] */
+	con_ptr->sec_rec = con_ptr->sam_ch/con_ptr->sam_sec;	/* [004] */
+/*????????????We may want to be sent this value to assure no rounding errs */
+	con_ptr->sam_haf = con_ptr->sam_sec/2;
+	con_ptr->kont_per = con_ptr->sam_sec * MAX_PER;
+	con_ptr->ms_sam = 1000/con_ptr->sam_sec;
+
+	if (con_ptr->wait_blk==507) {		/* [026] +++ */
+		con_ptr->val_avg = 8;
+		con_ptr->def_itc = 4;
+	} else {
+		con_ptr->val_avg = 16;
+		con_ptr->def_itc = 4;
+	}
+
+	con_ptr->itc = con_ptr->def_itc;
+	con_ptr->sptc = con_ptr->def_itc; 	/* [026] --- */
+
+/*-------define the amount of lookback as a function of sample rate--------*/
+
+		switch(con_ptr->sam_sec){             /* 006 */
+			case 10:
+				con_ptr->ldr = 3;
+				break;
+			case 20:
+#ifdef OLD20SPSF
+				con_ptr->ldr = 7;
+#else
+				con_ptr->ldr = 36;	/* New broadband */
+#endif
+		    		break;
+			case 40:
+				con_ptr->ldr = 16;
+				break;
+			case 80:
+				con_ptr->ldr = 34;
+				break;
+			default:
+				con_ptr->ldr = 3;
+		}                                      /* 006 */
+
+
+	det_par(con_ptr);	/* Dump out new parameters to console */
+
+	return;
+}
+
+/*----------------------------------------------------------------------*
+ *	Function: VOID det_par(con_ptr) - display new detector params	*
+ *----------------------------------------------------------------------*
+ *	Defined only PARAMS in mode					*
+ *----------------------------------------------------------------------*
+ *	Called by pass_one after setting up all new paramters.  	*
+ *	Displays new detector parameters on the console			*
+ *----------------------------------------------------------------------*
+ *	Arguments:	CONTEXT *con_ptr - pointer to the context	*
+ *				info (data from the previous run)	*
+ *----------------------------------------------------------------------*
+ *	Returns:	VOIDs don't return anything			*
+ *----------------------------------------------------------------------*
+ *	Fatal Errors:	This routine does not have fatal exits		*
+ *----------------------------------------------------------------------*/
+
+VOID det_par(con_ptr)
+register CONTEXT *con_ptr;
+{
+	p_warn(con_ptr->ch_name);
+	p_disp(" Detector Parameters:");
+	p_cont();
+	p_disp("filhi:"); p_numout(con_ptr->filhi,10);
+	p_disp(" fillo:"); p_numout(con_ptr->fillo,10);
+	p_disp(" iwin:"); p_numout(con_ptr->iwin,10);
+	p_disp(" xth1:"); p_numout(con_ptr->xth1,8);
+	p_disp(" xth2:"); p_numout(con_ptr->xth2,8);
+	p_disp(" xth3:"); p_numout(con_ptr->xth3,8);
+	p_disp(" xthx:"); p_numout(con_ptr->xthx,8);
+	p_disp(" n_hits:"); p_numout(con_ptr->n_hits,10);
+#ifdef EXTEVPAR
+	p_cont();			/* [026] +++ */
+	p_disp("no_ch:"); p_numout(con_ptr->no_ch,10);
+	p_disp(" ch_no:"); p_numout(con_ptr->ch_no,10);
+	p_disp(" sam_sec:"); p_numout(con_ptr->sam_sec,10);
+	p_disp(" sam_ch:"); p_numout(con_ptr->sam_ch,10);
+	p_disp(" wait_blk:"); p_numout(con_ptr->wait_blk,10);
+	p_cont();
+	p_disp("def_tc:"); p_numout(con_ptr->def_tc,10);
+	p_disp(" def_itc:"); p_numout(con_ptr->def_itc,10);
+	p_disp(" val_avg:"); p_numout(con_ptr->val_avg,10);	
+#endif
+	p_crlf();			/* [026] --- */
+	return;
+}
+/*----------------------------------------------------------------------*
+ *	Function: VOID indat(input,con_ptr) - Load data for analysis	*
+ *----------------------------------------------------------------------*
+ *	Loads seismic buffers into internal format for analysis.	*
+ *	Which channel that is used (if there are more than one channel	*
+ *	in a record) are determined by con_ptr->no_ch which is		*
+ *	ultimately determined by an argument sent to e_detect		*
+ *----------------------------------------------------------------------*
+ *	Arguments:	struct rec_str *input - pointer to the input	*
+ *				data buffer				*
+ *			CONTEXT *con_ptr - pointer to the context	*
+ *				information (data from previous runs)	*
+ *----------------------------------------------------------------------*
+ *	Returns:	VOIDs don't return anything			*
+ *----------------------------------------------------------------------*
+ *	Fatal Errors:	This routine does not have fatal exits		*
+ *----------------------------------------------------------------------*/
+
+VOID indat(input,con_ptr)
+register struct rec_str *input;
+register CONTEXT *con_ptr;
+{
+
+	register INT16 j,lp,i;
+	WORD gf;
+	register INT32 l_data;
+
+#ifdef EVD_CTS	/* [010] */
+	k_indat++;
+	in_indat=TRUE; /* [011] */
+#endif
+
+	time.yr = year0(input);			   /* [003] */
+#ifdef YEAR1D
+	time.yr += year1(input)*10;
+#endif
+	time.day = (day2(input)*100)+(day1(input)*10)+day0(input);/* [003] */
+	time.hr = (hour1(input)*10)+hour0(input);		   /* [003] */
+	time.min = (minut1(input)*10)+minut0(input);		   /* [003] */
+	time.sec = (secon1(input)*10)+secon0(input);		   /* [003] */
+	time.msec = (milli2(input)*100)+(milli1(input)*10);	   /* [003] */
+
+#ifdef TIMESTAMP
+	if(time.min == 0) {
+		printf(" %01d %03d %02d:%02d:%02d\n",
+			  time.yr,time.day,time.hr,time.min,time.sec);
+	}
+#endif
+
+	lp = LDM-con_ptr->ldr;          /* [006] [012] */
+
+/*---------read in the last ldr values of last record for the filter------*/
+
+	for(i = 0;i < con_ptr->ldr; i++) data[lp++] = 
+				con_ptr->sav_data[i];/* [006][012] */
+
+	for(i = (con_ptr->ch_no)*2; i < (con_ptr->sam_rec)*2; 
+			i += (con_ptr->no_ch)*2) {
+
+#ifdef RSTN		/* CDSN/RSTN data format */
+
+		j =  (input->datbuf[i] & 0x3F) << 8; /* High order */
+		j |= (input->datbuf[i+1] & 0xFF);/* Low Order */
+		j -= 8191;			/* Two's compliment */
+
+		gf = (input->datbuf[i] & 0xC0)>>6;	/* Gain code */
+
+		l_data = (long) j;
+
+		switch (gf) {
+			case 1:	
+				l_data <<= 2;
+				break;
+			case 2:
+				l_data <<= 4;
+				break;
+			case 3:
+				l_data <<= 7;
+				break;
+		}
+
+#endif
+#ifdef SRODF
+
+		j =  (input->datbuf[i] & 0x0F) << 8; /* High order */
+		j |= (input->datbuf[i+1] & 0xFF); /* Low Order */
+		if (j >= 0x800) j-=4096;	/* Two's compliment */
+
+		gf = (input->datbuf[i] & 0xF0)>>4;	/* Gain code */
+
+		l_data = (long) j;
+
+		l_data <<= (10-gf);
+
+#endif
+#ifdef WWSSN
+
+		j =  (input->datbuf[i] & 0xFF) << 8;	/* High order */
+		j |= (input->datbuf[i+1] & 0xFF);	/* Low Order */
+		
+		l_data = (long) j;
+#endif
+
+		data[lp++] = l_data;			/* Do it once [012] */
+
+	}
+
+/*-------------Save last ldr values of current record-----------------------*/
+
+	for(i=0,j=con_ptr->sam_ch+LDM-con_ptr->ldr;i<con_ptr->ldr;i++,j++)    
+				con_ptr->sav_data[i]=data[j];   /* [006] */
+
+#ifdef EVD_CTS
+	in_indat=FALSE; /* [011] */
+#endif
+	return;
+
+}
+/*----------------------------------------------------------------------*
+ *	Function: BOOL p_one(con_ptr) - Form the P-T series		*
+ *----------------------------------------------------------------------*
+ *	The primary function of p_one is to detect the peaks and 	*
+ *	troughs of the input time series.  Also, the rectified P-T 	*
+ *	values are compared to a threshold for noise: thx (typically	*
+ *	1.5625xs').  Values less than thx are counted, and the 		*
+ *	maximum of 20 such sucessive values are fed into p_two		*
+ *----------------------------------------------------------------------*
+ *	Arguments:	CONTEXT *con_ptr - pointer to the context	*
+ *				information (data from previous runs)	*
+ *----------------------------------------------------------------------*
+ *	Returns:	TRUE - Peak or trough detected			*
+ *			FALSE - No Peak or trough detected		*
+ *----------------------------------------------------------------------*
+ *	Fatal Errors:	This routine does not have fatal exits		*
+ *----------------------------------------------------------------------*/
+
+BOOL p_one(con_ptr)
+register CONTEXT *con_ptr;
+{
+	register BOOL neg_sin;
+	INT32 del_amp,ab_amp;
+
+#ifdef EVD_CTS	/* [010] */
+	k_p_one++;
+#endif
+
+	del_amp = fil_out - con_ptr->last_y;
+
+	con_ptr->sum_s_c++;
+
+	if(del_amp < 0) neg_sin = TRUE;
+	else neg_sin = FALSE;
+
+/*-------------Was the last value a peak or trough------------------------*/
+/*  test for compatibility with new_china   */
+
+	if(con_ptr->prev_sin==2)con_ptr->prev_sin=neg_sin;
+
+	if(con_ptr->prev_sin != neg_sin) {
+		con_ptr->s_amp = con_ptr->max_y - con_ptr->last_y;
+		ab_amp = absval(con_ptr->s_amp);
+
+		con_ptr->prev_sin = neg_sin;
+		con_ptr->max_y = con_ptr->last_y; 
+		con_ptr->tim_of_y = con_ptr->last_x;
+		con_ptr->rec_of_y = con_ptr->rec_x;	/* [021] */
+
+		con_ptr->last_y = fil_out;
+		con_ptr->last_x = sam_no;
+		con_ptr->rec_x = con_ptr->cur_rec;	/* [021] */
+
+/*-------------Get max of 20 P-T values less than thx,--------------------*/
+
+		if(ab_amp >= con_ptr->thx)	{
+			con_ptr->s_sum_sc = con_ptr->sum_s_c;
+			con_ptr->sum_s_c = 0;
+
+			return(TRUE);
+		}
+
+		if(ab_amp > con_ptr->maxamp) con_ptr->maxamp = ab_amp;
+
+/*--------------and send this maximum to p_two.--------------------------*/
+
+		if(++con_ptr->index == 20) { /* increment index */
+			p_two(con_ptr->maxamp,con_ptr);
+
+			con_ptr->maxamp = 0L;
+			con_ptr->index = 0;
+		}
+
+		con_ptr->s_sum_sc = con_ptr->sum_s_c;
+		con_ptr->sum_s_c = 0;
+		return(TRUE);
+
+	}
+
+	con_ptr->prev_sin = neg_sin;
+	con_ptr->last_y = fil_out; 
+	con_ptr->last_x = sam_no;
+	con_ptr->rec_x = con_ptr->cur_rec;	/* [021] */
+
+	return(FALSE);
+
+}
+/*----------------------------------------------------------------------*
+ *	Function: VOID p_two(maxamp,con_ptr) - Estimate average P-T	*
+ *----------------------------------------------------------------------*
+ *	p_two estimates the statistical dispersion of the background	*
+ *	noise and calculates the four thresholds that are used in the	*
+ *	detector.  The dispersion is estimated by averaging the last	*
+ *	16 rectified maximums received from p_one.  The average value	*
+ *	thus obtained is s'.  For zero-mean normally distributed	*
+ *	P-T values, s' is an estimate of twice the sample standard	*
+ *	deviation of the P-T values.
+ *----------------------------------------------------------------------*
+ *	Arguments:	INT32 maxamp - maximum (absolute) of 20		*
+ *				successive P-T values < thx		*
+ *			CONTEXT *con_ptr - pointer to the context	*
+ *				info (data from the previous run)	*
+ *----------------------------------------------------------------------*
+ *	Returns:	VOIDs don't return anything			*
+ *----------------------------------------------------------------------*
+ *	Fatal Errors:	This routine does not have fatal exits		*
+ *----------------------------------------------------------------------*/
+
+VOID p_two(maxamp,con_ptr)
+INT32 maxamp;
+register CONTEXT *con_ptr;
+{
+	register INT16 i;
+	INT32 sum,xth();
+
+#ifdef EVD_CTS	/* [010] */
+	k_p_two++;
+#endif
+
+	if(!con_ptr->evon) {
+
+		sum = 0;
+
+		con_ptr->tsstak[con_ptr->kk] = maxamp;
+
+		if(++con_ptr->kk == con_ptr->val_avg) con_ptr->kk = 0; 
+						/* [026] +++ */
+
+		for(i= 0;i < con_ptr->val_avg; i++) sum += con_ptr->tsstak[i];
+
+		switch (con_ptr->val_avg) {
+		
+		case 16:
+			con_ptr->twosd = sum >> 4;
+			break;
+		case 8:
+			con_ptr->twosd = sum >> 3;
+			break;
+		default:
+			con_ptr->twosd = sum / con_ptr->val_avg;
+			break;
+		}				/* [026] --- */
+
+		con_ptr->th1 = xth(con_ptr->xth1,con_ptr);
+		con_ptr->th2 = xth(con_ptr->xth2,con_ptr);
+		con_ptr->th3 = xth(con_ptr->xth3,con_ptr);
+		con_ptr->thx = xth(con_ptr->xthx,con_ptr);
+	}
+
+	return;
+}
+/*----------------------------------------------------------------------*
+ *	Function: INT32 xth(xthi,con_ptr) - Calculate threshold		*
+ *----------------------------------------------------------------------*
+ *	Calculate threshold from encoded factors xthi			*
+ *	Adapted from an algorithm by R.R. Reynolds and C.R. Hutt 	*
+ *----------------------------------------------------------------------*
+ *	Arguments:	WORD xthi - factor				*
+ *			CONTEXT *con_ptr - pointer to the context	*
+ *				info (data from the previous run)	*
+ *----------------------------------------------------------------------*
+ *	Returns:	Return the threshold value			*
+ *----------------------------------------------------------------------*
+ *	Fatal Errors:	This routine does not have fatal exits		*
+ *----------------------------------------------------------------------*/
+
+INT32 xth(xthi,con_ptr)
+register WORD xthi;  		/* changed from short, 16 may 85  */
+register CONTEXT *con_ptr;
+{
+
+	INT32 th = 0;
+	register WORD x_left;
+
+	x_left = xthi >>3;
+
+	if(x_left) {
+		if(x_left & 020) th  = con_ptr->twosd<<4;	/* [024] */
+		if(x_left & 010) th += con_ptr->twosd<<3;
+		if(x_left & 004) th += con_ptr->twosd<<2;
+		if(x_left & 002) th += con_ptr->twosd<<1;
+		if(x_left & 001) th += con_ptr->twosd;
+	}
+	if(xthi & 07) {
+		if(xthi & 01) th += con_ptr->twosd>>3;
+		if(xthi & 02) th += con_ptr->twosd>>2;
+		if(xthi & 04) th += con_ptr->twosd>>1;
+	}
+	return(th);
+}
+
+/*----------------------------------------------------------------------*
+ *	Function: VOID period(con_ptr,p_kont) - Find "floating point"	*
+ *						for output		*
+ *----------------------------------------------------------------------*
+ *	Calculate "floating point" period.				*
+ *----------------------------------------------------------------------*
+ *	Arguments:	CONTEXT *con_ptr - pointer to the context	*
+ *				information (data from previous runs)	*
+ *			INT16 p_kont - samples in the period		*
+ *----------------------------------------------------------------------*
+ *	Returns:	VOIDs don't return anything			*
+ *----------------------------------------------------------------------*
+ *	Fatal Errors:	This routine does not have fatal exits		*
+ *----------------------------------------------------------------------*/
+
+VOID period(con_ptr,p_kont)
+register CONTEXT *con_ptr;
+INT16 p_kont;
+{
+	INT16 i,basetl,reftr;
+
+	basetl = con_ptr->kont_per;
+	i = MAX_PER;
+
+	while(basetl >= 0) {
+		p_lval = i--;
+		if(p_kont >= basetl) break;
+		basetl -= con_ptr->sam_sec;
+	}
+
+	reftr = p_kont - basetl;
+	p_rval = 1000;		/* one thousand millisec	*/
+
+	for(i = (con_ptr->sam_sec - 1);i >= 0;i--) {
+		if(reftr > i) break;
+		p_rval -= con_ptr->ms_sam;
+	}
+	return;
+}
+/*----------------------------------------------------------------------*
+ *	Function: INT16 ck_t_kont(con_ptr,t_kont) - reduce t_kont	*
+ *----------------------------------------------------------------------*
+ *	ck_t_kont() is implemented to process records that are one	*
+ *	minute or longer in length.  For such records, it reduces	*
+ *	t_kont to less than the number of counts per minute, and	*
+ *	adjusts the time fields accordingly				*
+ *----------------------------------------------------------------------*
+ *	Arguments:	CONTEXT *con_ptr - pointer to the context	*
+ *				info (data from the previous run)	*
+ *			INT16 t_kont - number of counts from beginning	*
+ *				or end of record to onset of event	*
+ *----------------------------------------------------------------------*
+ *	Returns:	INT16 - updated t_kont				*
+ *----------------------------------------------------------------------*
+ *	Fatal Errors:	This routine does not have fatal exits		*
+ *----------------------------------------------------------------------*/
+
+INT16 ck_t_kont(con_ptr,t_kont)		/* [025] */
+CONTEXT *con_ptr;
+INT16 t_kont;
+{
+	INT16 min_cor;
+
+	min_cor = t_kont / (con_ptr->sam_sec * 60);
+
+	if (min_cor==0) return(t_kont);
+
+	t_kont -= 60 * con_ptr->sam_sec * min_cor;
+
+	if (min_cor < 0) {
+		if ((time.min += min_cor) < 0) {
+			time.min += 60;
+			if (--time.hr < 0) {
+				time.hr = 23;
+				if (--time.day == 0) 
+					time.day = time.prv_yr;
+					time.yr--;
+			}
+		}
+	}
+	if (min_cor > 0) {
+		if ((time.min += min_cor) >= 60) {
+			time.min -= 60;
+			if (++time.hr == 24) {
+				time.hr = 0;
+				if (++time.day>= time.day_yr)
+					time.day = 1;
+					time.yr++;
+			}
+		}
+	}
+
+	return(t_kont);
+
+}	/* [025] */
+/*----------------------------------------------------------------------*
+ *	Function: INT16 time_f(con_ptr,t_kont,tc) - "floating point"	*
+ *						for output		*
+ *----------------------------------------------------------------------*
+ *	Find "floating point" time of onset.				*
+ *----------------------------------------------------------------------*
+ *	Arguments:	CONTEXT *con_ptr - pointer to the context	*
+ *				info (data from the previous run)	*
+ *			INT16 t_kont - onset sample #			*
+ *			INT16 tc - time correction			*
+ *----------------------------------------------------------------------*
+ *	Returns:	INT16 - onset time				*
+ *----------------------------------------------------------------------*
+ *	Fatal Errors:	This routine does not have fatal exits		*
+ *----------------------------------------------------------------------*/
+
+INT16 time_f(con_ptr,t_kont,tc)
+register CONTEXT *con_ptr;
+INT16 t_kont,tc;
+{
+
+	INT16 reftr,t_lval;
+
+	t_kont = ck_t_kont(con_ptr,t_kont);
+	t_lval = t_kont / con_ptr->sam_sec;
+
+	reftr = t_kont - t_lval * con_ptr->sam_sec;
+
+	t_rval = reftr * con_ptr->ms_sam + time.msec - tc;
+
+	while (t_rval >= 1000) {
+		t_lval++;
+		t_rval -= 1000;
+	}
+
+	while (t_rval <= -1000) {
+		t_lval--;
+		t_rval += 1000;
+	}
+
+	if (t_rval < 0) {
+		t_lval--;
+		t_rval += 1000;
+	}
+
+	t_lval += time.sec;
+
+	return(t_lval);
+}
+/*----------------------------------------------------------------------*
+ *	Function: VOID dum_out(con_ptr) - Dummy Output			*
+ *----------------------------------------------------------------------*
+ *	Dummy output. The user should supply the code for outputting	*
+ * 	data to tape or other device, if such output is indeed wanted.	*
+ *	As implemented here, the detector is disabled for 2 X out_len	*
+ *	samples and then reenabled.  Thresholds are computed anew while	*
+ *	data are being written to the imaginary tape unit during the 	*
+ *	next 2 X out_len samples (2 X 1014 samples here).		*
+ *----------------------------------------------------------------------*
+ *	Arguments:	CONTEXT *con_ptr - pointer to the context	*
+ *				info (data from the previous run)	*
+ *----------------------------------------------------------------------*
+ *	Returns:	VOIDs don't return anything			*
+ *----------------------------------------------------------------------*
+ *	Fatal Errors:	This routine does not have fatal exits		*
+ *----------------------------------------------------------------------*/
+
+VOID dum_out(con_ptr)
+register CONTEXT *con_ptr;
+{
+
+#ifdef EVD_CTS /* [011] */
+	k_dumout++;
+	in_dumout=TRUE;
+#endif
+
+	if(con_ptr->itc > 0) { /* itc was set to 4 in ibingo(con_ptr) [011] */
+		if(++con_ptr->nn >= con_ptr->wait_blk) {  
+					/* increment nn [011] [026] */
+			con_ptr->nn = 0;
+			con_ptr->itc--;	/* decrement record counter */     
+		}
+	}
+
+	if(con_ptr->itc <= TIM_OFF) con_ptr->evon = FALSE; 
+			/* enable detecting events */
+
+#ifdef EVD_CTS /* [011] */
+	in_dumout=FALSE;
+#endif
+	return;
+}
+/*----------------------------------------------------------------------*
+ *	Function: BOOL event(con_ptr) - Detect events			*
+ *----------------------------------------------------------------------*
+ *	Detects events using thresholds th1 and th2. For n_hits = 4	*
+ *	an event will be detected if 4 values are greater than th2, or	*
+ *	if 3 values are greater than th2, and one (or more) of the 3	*
+ *	are greater than th1 (see O-F report 83-785).			*
+ *----------------------------------------------------------------------*
+ *	Arguments:	CONTEXT *con_ptr - pointer to the context	*
+ *				info (data from the previous run)	*
+ *----------------------------------------------------------------------*
+ *	Returns:	TRUE - if event declared			*
+ *			FALSE - no event declared			*
+ *----------------------------------------------------------------------*
+ *	Fatal Errors:	This routine does not have fatal exits		*
+ *----------------------------------------------------------------------*/
+
+BOOL event(con_ptr)
+register CONTEXT *con_ptr;
+{
+
+	INT16 j,m;
+	INT16 tfbp;
+	INT32 ab_amp;
+
+#ifdef EVD_CTS	/* [010] */
+	k_event++;
+	in_event=TRUE;
+#endif
+
+	ab_amp = absval(con_ptr->s_amp);
+
+	if(con_ptr->jj > 3) con_ptr->jj = 0;
+
+	con_ptr->abuf_rec[con_ptr->jj] = con_ptr->rec_tim;	/* [021] */
+	con_ptr->abuf_sc[con_ptr->jj] = con_ptr->last_sc;
+	con_ptr->abuf_amp[con_ptr->jj] = con_ptr->lst_amp;	/* [006] */
+	con_ptr->abuf_tim[con_ptr->jj++] = con_ptr->last_tim;  
+						/* NB jj incremented   */
+	con_ptr->last_sc = con_ptr->s_sum_sc; 
+	con_ptr->lst_amp = con_ptr->s_amp; 
+	con_ptr->last_tim = con_ptr->tim_of_y;
+	con_ptr->rec_tim = con_ptr->rec_of_y;			/* [021] */
+
+	if(con_ptr->evon) {
+		if(con_ptr->fbp > (con_ptr->lbp2=con_ptr->lbp)) 
+					con_ptr->lbp2 += E_B; 
+
+		if((con_ptr->lbp2 - con_ptr->fbp) == 7) {
+			con_ptr->sumdsc += con_ptr->s_sum_sc;
+			wbuff(con_ptr);
+			con_ptr->icheck = TRUE;
+			return(TRUE);		/* Event Declared! */
+		}
+
+		if((con_ptr->lbp2 - con_ptr->fbp) < 8) {
+			con_ptr->sumdsc += con_ptr->s_sum_sc;
+			wbuff(con_ptr);
+			return(FALSE);
+		}
+
+		if(con_ptr->icheck) return(FALSE);
+
+		con_ptr->icheck = TRUE;
+		return(TRUE);
+
+	}
+
+/*--------------Was event possible set in previous pass-------------------*/
+
+	if(!con_ptr->epf) {
+
+		if(ab_amp < con_ptr->th2) return(FALSE);
+		if(ab_amp < con_ptr->th1) thf = 1;
+		else thf = 2;
+
+		con_ptr->epf = TRUE; 
+		con_ptr->fbp = 4; 
+		con_ptr->cbp = 4; 
+		con_ptr->lbp = 3;
+
+		m = con_ptr->jj;
+
+		if(m > 3) m = 0;
+
+/*---Sum of delta sample counts - load large buffers from abbrev buffers---*/
+
+		con_ptr->sumdsc = -con_ptr->abuf_sc[m];
+
+		for(j = 0; j < 4; j++) {
+			if(m > 3) m = 0;
+
+			con_ptr->sumdsc += con_ptr->abuf_sc[m];
+			con_ptr->buf_rec[j] = con_ptr->abuf_rec[m];/* [021] */
+			con_ptr->buf_sc[j] = con_ptr->sumdsc;
+			con_ptr->buf_amp[j] = con_ptr->abuf_amp[m];
+			con_ptr->buf_tim[j] = con_ptr->abuf_tim[m++];
+						 /* m incremented */
+		}
+		con_ptr->sumdsc += con_ptr->s_sum_sc;
+
+		wbuff(con_ptr);
+		return(FALSE);
+	}
+
+	con_ptr->sumdsc += con_ptr->s_sum_sc;
+
+/*--------------Event possible flag set; however, is current----------------*/
+/*----------------------P-T value >= smallest threshold---------------------*/
+
+	if(ab_amp >= con_ptr->th2) {
+		thf = 1;
+
+		if(ab_amp >= con_ptr->th1) thf = 2;
+
+/*----------------Is interval between P-T values too small?-----------------*/
+
+		if((con_ptr->sumdsc - con_ptr->buf_sc[con_ptr->cbp]) 
+				<= con_ptr->filhi) {
+			thf = 0;
+			wbuff(con_ptr);
+			return(FALSE);
+		}
+
+/*----------------Is interval between P-T values too large?-----------------*/
+
+		if((con_ptr->sumdsc - con_ptr->buf_sc[con_ptr->cbp]) 
+				>= con_ptr->fillo) {
+			wbuff(con_ptr);
+			con_ptr->fbp = con_ptr->lbp;
+			con_ptr->cbp = con_ptr->lbp;
+			return(FALSE);
+		}
+		if(con_ptr->fbp == con_ptr->cbp) {
+			wbuff(con_ptr);
+			con_ptr->cbp = con_ptr->lbp;
+			return(FALSE);
+		}
+	
+/*------------------Current P-T value >= smallest threshold,----------------*/
+/*--------------------nevertheless slide window if necessary----------------*/
+
+		while((con_ptr->sumdsc - con_ptr->buf_sc[con_ptr->fbp])
+			 > con_ptr->iwin) {
+			con_ptr->indx = con_ptr->fbp;
+			con_ptr->cbp2 = con_ptr->cbp;
+			if((con_ptr->indx + 1) > con_ptr->cbp) 
+					con_ptr->cbp2 = con_ptr->cbp + E_B;
+			for(j = (con_ptr->indx + 1);j <= con_ptr->cbp2;j++) {
+				if(con_ptr->fbp == B_M1)con_ptr->fbp = -1; 
+				if(con_ptr->buf_flg[++con_ptr->fbp] != 0)
+						 break;	/* fbp incremented */ 
+						/* [30] == to != */
+			}
+		}
+		wbuff(con_ptr);
+	
+		con_ptr->cbp = con_ptr->lbp;
+		con_ptr->iset = FALSE;
+		con_ptr->sumflg = 0;
+		con_ptr->cbp2 = con_ptr->cbp;
+	
+		if(con_ptr->cbp < con_ptr->fbp) 
+			con_ptr->cbp2 = con_ptr->cbp + E_B;
+	
+/*---------Check for event by evaluating values in flag buffer--------------*/
+
+		for(j = con_ptr->fbp;j <= con_ptr->cbp2;j++) {
+			con_ptr->index2 = j;
+			if(con_ptr->index2 > B_M1) con_ptr->index2 -= E_B; 
+			if(con_ptr->buf_flg[con_ptr->index2] != 0) 
+					con_ptr->sumflg++;
+			if(con_ptr->buf_flg[con_ptr->index2] == 2) 
+					con_ptr->iset = TRUE;
+		}
+		if(con_ptr->sumflg < 3 ) return(FALSE);
+		if(con_ptr->iset) {
+			ibingo(con_ptr);	/* Event detected */
+			return(FALSE);		/* But not yet declared */
+		}
+		if(con_ptr->sumflg >= con_ptr->n_hits) ibingo(con_ptr);
+						 /* [022] n_hits is a param */
+		return(FALSE);		/* Event detected but not declared */
+	}
+
+	thf = 0;
+	wbuff(con_ptr);
+	
+/*------Event possible flag is set, however current P-T value is less-------*/
+/*------than smallest threshold.  Slide window if necessary to that---------*/
+/*------first value in window is a flagged value, if possible.  Otherwise---*/
+/*------reset event possible flag.------------------------------------------*/
+
+	while((con_ptr->buf_sc[con_ptr->lbp] - 
+			con_ptr->buf_sc[con_ptr->fbp]) > con_ptr->iwin) {
+		con_ptr->cbp2 = con_ptr->cbp;
+	 	if(con_ptr->fbp > con_ptr->cbp) 
+				con_ptr->cbp2 = con_ptr->cbp + E_B;
+		if(con_ptr->cbp2 <= con_ptr->fbp) {
+				con_ptr->epf = FALSE;	/* First value in 
+					window is not a flagged value */
+			return(FALSE);
+		}
+		for(j = (con_ptr->fbp + 1);j <= con_ptr->cbp2;j++) {
+			tfbp = j;
+			if(tfbp > B_M1) tfbp -= E_B;
+			if(con_ptr->buf_flg[tfbp] > 0) break;
+		}
+		con_ptr->fbp = tfbp;	/* First value in window is flagged */
+	}
+	return(FALSE);
+}
+/*----------------------------------------------------------------------*
+ *	Function: VOID wbuff(con_ptr) - Write buffers			*
+ *----------------------------------------------------------------------*
+ *	Writes values to buffers when an event might be in progress	*
+ *----------------------------------------------------------------------*
+ *	Arguments:	CONTEXT *con_ptr - pointer to the context	*
+ *				info (data from the previous run)	*
+ *----------------------------------------------------------------------*
+ *	Returns:	VOID's don't return anything			*
+ *----------------------------------------------------------------------*
+ *	Fatal Errors:	This routine does not have fatal exits		*
+ *----------------------------------------------------------------------*/
+
+VOID wbuff(con_ptr)
+register CONTEXT *con_ptr;
+{
+
+	if(con_ptr->lbp++ == B_M1) con_ptr->lbp = 0;  /* increment lbp */
+
+	con_ptr->buf_flg[con_ptr->lbp] = thf;     
+	con_ptr->buf_sc[con_ptr->lbp] = con_ptr->sumdsc;
+	con_ptr->buf_amp[con_ptr->lbp] = con_ptr->s_amp;
+	con_ptr->buf_tim[con_ptr->lbp] = con_ptr->tim_of_y;
+	con_ptr->buf_rec[con_ptr->lbp] = con_ptr->rec_of_y;	/* [021] */
+
+	return;
+}
+/*----------------------------------------------------------------------*
+ *	Function: VOID ibingo(con_ptr) - Sets parameters 		*
+ *----------------------------------------------------------------------*
+ *	Sets parameters when an event has been detected 		*
+ *----------------------------------------------------------------------*
+ *	Arguments:	CONTEXT *con_ptr - pointer to the context	*
+ *				info (data from the previous run)	*
+ *----------------------------------------------------------------------*
+ *	Returns:	VOID's Don't return anything			*
+ *----------------------------------------------------------------------*
+ *	Fatal Errors:	This routine does not have fatal exits		*
+ *----------------------------------------------------------------------*/
+
+VOID ibingo(con_ptr)
+register CONTEXT *con_ptr;
+{
+
+#ifdef EVD_CTS	/* [010] */
+	k_ibingo++;
+#endif
+
+/*
+	con_ptr->th1 <<= 1;
+	con_ptr->th2 <<= 1;
+	con_ptr->thx <<= 1;	stuff moved to onset [31] */
+
+	con_ptr->epf = FALSE; 
+	con_ptr->evon = TRUE; 
+	con_ptr->icheck = FALSE; 
+	con_ptr->itc = con_ptr->def_itc; 	/* [026] */
+	con_ptr->nn = 0;		/* [020] Reset retrigger sequence */
+
+	return;
+}
+
+/*----------------------------------------------------------------------*
+ *	Function: VOID onsetq(con_ptr,onsetdata,input) - Estimate onset	*
+ *----------------------------------------------------------------------*
+ *	Estimates parameters of signal onset, calls onset()		*
+ *----------------------------------------------------------------------*
+ *	Arguments:	CONTEXT *con_ptr - pointer to the context	*
+ *				information (data from previous runs)	*
+ *			ONSETI *onsetdata - onset pointer for onset() 	*
+ *				to put onset info in			*
+ *----------------------------------------------------------------------*
+ *	Returns:	VOID's don't return anything			*
+ *----------------------------------------------------------------------*
+ *	Fatal Errors:	This routine does not have fatal exits		*
+ *----------------------------------------------------------------------*/
+
+VOID onsetq(con_ptr,onsetdata,input)
+register CONTEXT *con_ptr;
+ONSETI *onsetdata;
+register struct rec_str *input;
+{
+
+	INT16 fbp_p1,fbp_p2,fbp_m1,fbp_m2,fbp_m3,fbp_m4,cur_fbp,fp,lb,
+	      p1,p2,p3,p4,p5,p6,tc,per_bp,tsc,kase,tpc;
+
+#ifdef EVD_CTS	/* [010] */
+	in_event=FALSE;
+	k_onsetq++;
+#endif
+
+	kase = 0;
+
+	cur_fbp = con_ptr->fbp;
+
+	fbp_m4 = cur_fbp -4;
+	if(fbp_m4 < 0) fbp_m4 = cur_fbp + B_M4;
+
+	fbp_m3 = cur_fbp - 3;
+	if(fbp_m3 < 0) fbp_m3 = cur_fbp + B_M3;
+
+	fbp_m2 = cur_fbp - 2;
+	if(fbp_m2 < 0) fbp_m2 = cur_fbp + B_M2;
+
+	fbp_m1 = cur_fbp - 1;
+	if(fbp_m1 < 0) fbp_m1 = cur_fbp + B_M1;
+
+	fbp_p1 = cur_fbp + 1;
+	if(fbp_p1 >= E_B) fbp_p1 = cur_fbp - B_M1;
+
+	fbp_p2 = cur_fbp + 2;
+	if(fbp_p2 >= E_B) fbp_p2 = cur_fbp - B_M2;
+
+	per_bp = cur_fbp + 8;
+	if(per_bp > B_M1) per_bp -= E_B;
+
+	tsc = con_ptr->buf_sc[per_bp] - con_ptr->buf_sc[cur_fbp] + RO;
+	tsc >>= 2;
+	tpc = tsc;
+
+	if(tsc < con_ptr->sam_sec) tsc = con_ptr->sam_sec;
+
+/*----------------Code for looking back 2 p-t values---------------------*/
+
+	if((con_ptr->buf_sc[fbp_m1] - con_ptr->buf_sc[fbp_m2]) <= tsc) 
+		if (absval(con_ptr->buf_amp[fbp_m2])>=con_ptr->th3) 
+			kase=((con_ptr->buf_sc[fbp_m2] - 
+					con_ptr->buf_sc[fbp_m3])
+					> con_ptr->sam_haf)?1:2;
+	
+/*----------------Code for looking back 1 p-t value---------------------*/
+
+	if((kase==0)&&(con_ptr->buf_sc[cur_fbp] - 
+			con_ptr->buf_sc[fbp_m1])<= tsc) 
+		if (absval(con_ptr->buf_amp[fbp_m1])>=con_ptr->th3) 
+			kase=((con_ptr->buf_sc[fbp_m1] - 
+					con_ptr->buf_sc[fbp_m2])
+					> con_ptr->sam_haf)?3:4;
+		
+/*----------------Code for looking back 0 p-t values--------------------*/
+
+	if((kase==0)&&(con_ptr->buf_sc[cur_fbp] - 
+		con_ptr->buf_sc[fbp_m1]) <= con_ptr->sam_haf) kase=5;
+
+	switch (kase) {
+
+		case 1:
+			lb = 2; 
+			tc = con_ptr->def_tc; 
+			fp = fbp_m2; 
+
+			p1 = fbp_m2; 
+			p2 = fbp_m4; 
+			p3 = fbp_m3; 
+			p4 = fbp_m2; 
+			p5 = fbp_m1; 
+			p6 = cur_fbp;
+
+			break;
+		case 2:
+			lb = 2; 
+			tc = 0; 
+			fp = fbp_m2; 
+
+			p1 = fbp_m3;
+			p2 = fbp_m4; 
+			p3 = fbp_m3; 
+			p4 = fbp_m2; 
+			p5 = fbp_m1; 
+			p6 = cur_fbp;
+
+			break;
+		case 3:
+			lb = 1; 
+			tc = con_ptr->def_tc; 
+			fp = fbp_m1; 
+
+			p1 = fbp_m1; 
+			p2 = fbp_m3; 
+			p3 = fbp_m2;
+			p4 = fbp_m1; 
+			p5 = cur_fbp;
+			p6 = fbp_p1;
+
+			break;
+		case 4:
+			lb = 1; 
+			tc = 0; 
+			fp = fbp_m1; 
+
+			p1 = fbp_m2; 
+			p2 = fbp_m3; 
+			p3 = fbp_m2;
+			p4 = fbp_m1; 
+			p5 = cur_fbp; 
+			p6 = fbp_p1;
+
+			break;
+		case 5:
+			lb = 0; 
+			tc = 0; 
+			fp = cur_fbp; 
+
+			p1 = fbp_m1; 
+			p2 = fbp_m2; 
+			p3 = fbp_m1;
+			p4 = cur_fbp; 
+			p5 = fbp_p1; 
+			p6 = fbp_p2;
+
+			break;
+		default:
+			lb = 0;
+			tc = con_ptr->def_tc;
+			fp = cur_fbp; 
+	
+			p1 = cur_fbp; 
+			p2 = fbp_m2; 
+			p3 = fbp_m1;
+			p4 = cur_fbp; 
+			p5 = fbp_p1; 
+			p6 = fbp_p2;
+
+			break;
+
+		}
+
+	onset(con_ptr,onsetdata,lb,tpc,p1,tc,fp,con_ptr->buf_amp[p2],
+		con_ptr->buf_amp[p3],con_ptr->buf_amp[p4],
+		con_ptr->buf_amp[p5],con_ptr->buf_amp[p6],input);
+
+	return;
+}
+
+/*----------------------------------------------------------------------*
+ *	Function: VOID onset(con_ptr,onsetdata,ibak,sper,p1,tc,fp,pt0,	*
+ * 			pt1,pt2,pt3,pt4) - Calculate onset parameters	*
+ *----------------------------------------------------------------------*
+ *	Calculates period, amplitude,SNR series (O-F 83-785), and 	*
+ *	converts sample number to time. Outputs the estimates.		*
+ *----------------------------------------------------------------------*
+ *	Arguments:	CONTEXT *con_ptr - pointer to the context	*
+ *				info (data from the previous run)	*
+ *			ONSETI *onsetdata - where to store the onset	*
+ *				data for main program			*
+ *			INT16 ibak - # of P-T values looked back	*
+ *			INT16 sper - sample period			*
+ *			INT16 p1 - onset time of first P-T value of sig *
+ *			INT16 tc - time correction			*
+ *			INT16 fp - reference time			*
+ *			INT32 pt0 - Value 1 for SNR calc		*
+ *			INT32 pt1 - Value 2 for SNR calc		*
+ *			INT32 pt2 - Value 3 for SNR calc		*
+ *			INT32 pt3 - Value 4 for SNR calc		*
+ *			INT32 pt4 - Value 5 for SNR calc		*
+ *----------------------------------------------------------------------*
+ *	Returns:	VOID's don't return anything.			*
+ *----------------------------------------------------------------------*
+ *	Fatal Errors:	This routine does not have fatal exits		*
+ *----------------------------------------------------------------------*/
+
+VOID onset(con_ptr,onsetdata,ibak,sper,p1,tc,fp,pt0,pt1,pt2,pt3,pt4,input)
+register CONTEXT *con_ptr;
+ONSETI *onsetdata;
+INT16 ibak,sper,p1,tc,fp;
+INT32 pt0,pt1,pt2,pt3,pt4;
+register struct rec_str *input;
+{
+
+	INT16 i,idx,indx2,j,k,lbp2,lbp3,isnr[5],onset1;
+	INT32 mx_amp,base,pt[5],temp;
+	INT16 t_samp,d_samp;				/* [021] */
+	TEXT ipol;
+
+#ifdef 	EVD_CTS	/* [010] */
+	k2_onset++;
+#endif
+
+	pt[0] = pt0;
+	pt[1] = pt1; 
+	pt[2] = pt2; 
+	pt[3] = pt3; 
+	pt[4] = pt4;
+
+	for (j=0; j<5; j++) pt[j]=absval(pt[j]);
+
+	indx2 = fp;
+	mx_amp = 0;
+
+	for(j = 0;j < 8; j++) {
+		temp=absval(con_ptr->buf_amp[indx2]);
+		if (temp>mx_amp) mx_amp=temp;
+		if(indx2++ == B_M1) indx2 = 0;  /* indx2 incremented */
+	}
+
+	ipol = 'c';
+
+	if(pt2 > 0) ipol = 'd';
+
+	for(j = 0; j < 5; j++) {
+
+		base = con_ptr->twosd - (con_ptr->twosd>>1);
+		for(i = 0;i < 10;i++) {
+			isnr[j] = i;
+			if(pt[j] < base) break;
+			base += con_ptr->twosd;
+		}
+	}
+
+	period(con_ptr,sper);
+
+	t_samp = con_ptr->buf_tim[p1];			/* [021] +++ */
+	d_samp = con_ptr->cur_rec - con_ptr->buf_rec[p1];
+
+	if (d_samp < 0) d_samp += CUR_MAX;
+
+	if (d_samp > 0) t_samp -= con_ptr->sam_ch * d_samp;
+
+/*------------------the number of days in this year------------------------*/
+
+	time.yr = year0(input);			   /* [003] */
+#ifdef YEAR1D
+	time.yr += year1(input)*10;
+#else
+	time.yr += (EPOCH/10)*10;			/* Add decade # */
+	if (time.yr<EPOCH) time.yr+=10;		/* Next decade */
+#endif
+
+	time.day_yr=365;					/* [003] */
+	time.prv_yr=time.day_yr;
+	if (time.yr%4==0) time.day_yr++;			/* [003] */
+	if ((time.yr-1)%4==0) time.prv_yr++;
+			/* Leap function will be accurate until year 2100
+			   since year 2000 has a leap day (year/400) [003] */
+
+	onset1 = time_f(con_ptr,t_samp,tc);		/* [021] --- */
+
+	if(onset1 < 0) {
+		onset1 += 60;
+		if(--time.min < 0) {
+			time.min = 59;
+			if(--time.hr < 0) {
+				time.hr = 23;
+				if(--time.day == 0) {
+					time.day = time.prv_yr;
+					if(--time.yr < 0) time.yr = 9;
+				}
+			}
+		}
+	}
+	if(onset1 >= 60) {
+		onset1 -= 60;
+		if(++time.min == 60) {
+			time.min = 0;
+			if(++time.hr == 24) {
+				time.hr = 0; 
+				if(++time.day > time.day_yr) {
+					time.day = 1;
+					if(++time.yr == 10) time.yr = 0;
+				}
+			}
+		}
+	}
+
+#ifdef PONSET
+	
+	printf(" %s %d",con_ptr->ch_name,sam_no); 
+	printf(" %c %d ",ipol,ibak);
+	for(i = 0;i < 5;i++) printf("%d",isnr[i]);
+	printf(" %d ",time.yr);
+	printf("%03d ",time.day);
+	printf(" %02d",time.hr);
+	printf(":%02d:",time.min);
+	printf("%02d.%03d %ld %0d.%03d %ld",
+		onset1,t_rval,mx_amp,p_lval,p_rval,con_ptr->twosd);
+	printf("\n");
+#endif
+/*-----------------------------Diagnostic Onset Message for CDSN------------
+	p_warn(con_ptr->ch_name);
+	p_disp(" Onset ");
+	_p_char(ipol);		p_disp(" ");
+	p_numout(ibak,10);	p_disp(" ");
+	for(i = 0;i < 5;i++) p_numout(isnr[i],10);
+	p_disp(" ");
+	p_numout(time.yr,10);	p_disp(" ");
+	p_numout(time.day,10);	p_disp(" ");
+	p_numout(time.hr,10);	p_disp(":");
+	p_numout(time.min,10);	p_disp(":");
+	p_numout(onset1,10);	p_disp(".");
+	p_numout(t_rval,10);	p_disp(" ");
+	p_lngout(mx_amp,10);	p_disp(" ");
+	p_numout(p_lval,10);	p_disp(".");
+	p_numout(p_rval,10);	p_disp(" ");
+	p_lngout(con_ptr->twosd,10);
+	p_crlf();
+  ----------------------------------------------------------------------*/
+	
+	onsetdata->new_onset=TRUE;		/* New onset has occured */
+	onsetdata->o_polar=ipol;
+	onsetdata->o_look=ibak;			/* [018] Don't forget this */
+	for(i=0;i<5;i++) onsetdata->o_snr[i]=isnr[i];
+	onsetdata->o_year=time.yr;
+	onsetdata->o_days=time.day;
+	onsetdata->o_hours=time.hr;
+	onsetdata->o_mins=time.min;
+	onsetdata->o_secs=onset1;
+	onsetdata->o_msecs=t_rval;
+	onsetdata->o_amps=mx_amp;
+	onsetdata->o_pl=p_lval;
+	onsetdata->o_pr=p_rval;
+	onsetdata->o_large=con_ptr->twosd;
+
+#define bumpthresh(x) ((x) + ((x)>>2))	/* Increase thresholds factor of 1.25
+					   after an event [31] */
+
+	for(i = 0; i < 16;i++) 
+		con_ptr->tsstak[i] = bumpthresh(con_ptr->tsstak[i]);
+
+	con_ptr->kk=con_ptr->val_avg-1;	/* [028] reset to beginning */
+
+	con_ptr->index=19;		/* [023] Sync backgnd calc process */
+
+	con_ptr->twosd = bumpthresh(con_ptr->twosd);
+					/* [028] set the twosd itself */
+					/* [031] set thresholds */
+	con_ptr->maxamp = 0;		/* [028] Reset p_one +++ */
+	con_ptr->s_sum_sc = 0;
+	con_ptr->sum_s_c = 0;
+
+	con_ptr->prev_sin=con_ptr->max_y=con_ptr->last_y=0;
+	con_ptr->tim_of_y=con_ptr->last_x=0;
+
+	con_ptr->th1 = xth(con_ptr->xth1,con_ptr);	/* [028] New thres */
+	con_ptr->th2 = xth(con_ptr->xth2,con_ptr);
+	con_ptr->th3 = xth(con_ptr->xth3,con_ptr);
+	con_ptr->thx = xth(con_ptr->xthx,con_ptr);
+
+	return;
+}
+
+/*----End of Event detector----*/

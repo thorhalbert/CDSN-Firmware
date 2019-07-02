@@ -1,0 +1,353 @@
+	.data
+	.public	_mtwrite
+	.public MTGETF
+	.extern	__mtstreg,__p_char
+
+	.data
+timcnt:	.byte 0
+	.even
+
+	.text
+
+_mtwrite:
+	call	c_sav
+	add	sp,-8
+
+FULRET:
+	mov	al,0
+	mov	timcnt,al
+
+RESTAR:
+	mov	al,timcnt
+	inc	al
+	mov	timcnt,al
+
+/ Start the show
+
+	out	0xc0,ax		/ Clear edge detector
+
+	mov	al,0x0a		/ Turn on the NMI interrupt
+	out	0xc9,al
+
+L1:	
+	in	al,0xC8		/ Get input from main status port
+	test	al,16		/ Check to insure that DBY is off
+	jne	L1		/ Goto l3 if DBY is off
+
+	and	.w [bp][4],7	/ Insure that the drive id is clean
+	mov	di,.w [bp][4]	/ Insure that the drive was earlier opened
+	shl	di,1
+	test	.w __mtstreg[di],1
+	jne	L51
+	mov	ax,-3
+	jmp	c_ret		/ Return if it was not
+
+/ ----------------Set up the proper drive ids-----------------------------
+
+L51:	
+	mov	.w [bp][-10],0	/ Set status variables to 0
+	mov	ax,.w [bp][-10]
+	mov	.w [bp][-8],ax
+	mov	.w [bp][-8],2
+	test	.w [bp][4],4
+	je	L71
+	or	.w [bp][-8],16
+L71:	
+	test	.w [bp][4],1
+	je	L12
+	or	.w [bp][-8],8
+L12:	
+	test	.w [bp][4],2
+	je	L32
+	or	.w [bp][-8],4
+
+/ ----------------------Write out initial status and make drive wake up------
+
+L32:	
+	mov	al,.b [bp][-8]
+	out	0xa0, al	/ Put out a status 
+
+	mov	al,.b [bp][-10] 
+	out	0xa4, al	/ Put out c status
+
+	in	al, 0xC8	/ Get the a flags
+	mov	.w [bp][-12],ax
+
+	in	al, 0xCC	/ Get the c status 
+	not	al
+	mov	.w [bp][-14],ax
+
+	test	.w [bp][-14],8	/ If drive is not on line return error
+	jne	L52
+	mov	ax,-2
+	jmp	c_ret
+L52:	
+	test	.w [bp][-14],16	/ If drive is write protected, return error
+	je	L72
+	mov	ax,-4
+	jmp	c_ret
+
+L72:	
+	mov	bl,.b [bp][-8]	/ Put the normal status/drive id out
+
+	mov	cx,.w [bp][8]	/ Number of elements to output
+	dec	cx
+
+	mov	si,.w [bp][6]	/ Load pointer to data buffer
+
+	mov	bh,.b [bp][-10]	/ Load status C
+	or	bh,32
+
+	mov	al,bl		/ Get the command
+	or	al,64		/ Or the write command to it
+	out	0xA0, al
+
+	or	ax,1		/ Or the GO command over it
+	out	0xA0, al	
+
+	mov	al,bl
+	or 	al,64
+	out	0xA0, al	/ Put the write command again without GO
+
+	mov	al,bl
+	out	0xA0,al		/ Put out command without GO or write
+
+	mov	dl,0		/ Flag from interrupt routine
+
+TLOOP:
+
+	mov	al,.b [si]
+	out	0xa2, al
+
+	dec	cx
+	inc	si	
+
+	cmp	cx,0
+	je	LSTWRD	
+
+TPS:
+	in	al,0xCC
+	test	al,0x40
+
+	je	TPS
+
+	out	0xc0,ax
+
+	jmp	TLOOP
+
+LSTWRD:
+	in	al,0xCC
+	test	al,0x40
+
+	je	LSTWRD
+
+	out	0xc0,ax
+
+	mov	al,bh		/ Write last word
+	out	0xA4, al
+
+	mov	al,.b [si]
+	out	0xa2, al
+
+	dec cx
+
+LPS:
+	in	al,0xCC
+	test	al,0x40
+
+	je	LPS
+
+	out	0xc0,ax
+
+
+DBYWT:
+
+	in	al,0xcc
+	test	al,0x02
+	je	ENDTAP
+
+	in	al,0xc8		/ Wait for the DBY line to go away
+
+	test	al,16
+	jne	DBYWT
+
+	mov	al,.b [bp][-10]	/ Load up the C status
+	out	0xA4, al
+
+	mov	al,0x02		/ Turn off the NMI interrupt
+	out	0xc9,al
+
+	sub	ax,ax
+	jmp	c_ret
+
+ENDTAP:
+	mov	al,bh		/ Write last word
+	out	0xA4, al
+
+EOTWT:
+	in	al,0xc8		/ Wait for the DBY line to go away
+
+	test	al,16
+	jne	EOTWT
+
+	mov	al,0x02		/ Turn off the NMI interrupt
+	out	0xc9,al
+
+	mov	al,.b [bp][-10]	/ Load up the C status
+	out	0xA4, al
+
+	call	REVBLK		/ Unwrite last block
+
+	mov	ax,-5
+	jmp	c_ret
+
+
+MTGETF:				/ Service the interrupt
+
+	mov	al,0x02		/ Turn off the NMI interrupt
+	out	0xc9,al
+
+	pop	ax
+	pop	ax
+	pop	ax		/ Unwind the interrupt
+
+	in	al,0xc8		/ See where we are
+
+	mov	al,bh		/ Strobe last word (just in case)
+	out	0xA4, al
+
+	out	0xc0,ax
+
+	mov	bl,.b [bp][-8]	/ Put the normal status/drive id out
+
+	mov	bh,.b [bp][-10]	/ Load status C
+
+	mov	al,bh		/ Get the C command
+	out	0xa4, al	/ Put C
+
+	mov	al,bl		/ Get the A command
+	and	al,0xFD		/ Mask off FEN to reset formatter
+	out	0xA0, al	/ Put A
+
+	mov	al,bl		/ Get the A command
+	out	0xA0, al	/ Put A
+
+	test	al,0x01		/ See if FBY is set
+	je	GOHEAD		/ Formatter busy is off (error)
+
+DBWTLP:
+
+	in	al,0xcc
+	test	al,0x02
+	je	ENDTAP
+
+	in	al,0xc8		/ Wait for the FBY line to go away
+
+	test	al,1
+	jne	DBWTLP
+
+GOHEAD:
+
+	call	REVBLK		/ Back up over last error block
+	call	REVBLK		/ Back up over last error block
+
+	mov	al,timcnt
+	cmp	al,4
+	jg	SPACCL		/ Four retries
+
+	jmp	RESTAR		/ Try another retry
+
+SPACCL:
+	call	FIXERA		/ Space over bad tape 
+
+	jmp	FULRET		/ Start over
+
+
+
+/ Erase fixed block to skip over bad tape portion
+
+FIXERA:
+
+	mov	bl,.b [bp][-8]	/ Put the normal status/drive id out
+
+	mov	bh,.b [bp][-10]	/ Load status C
+
+	mov	al,bh		/ Get the C command
+	or	al,0x14		/ Set erase and wfm command (fixed erase)
+	out	0xa4, al	/ Put C
+
+	mov	al,bl		/ Get the A command
+	or	al,0x40		/ Write command (write fixed erase)
+	out	0xA0, al	/ Put A
+	out	0xA0, al	/ Put A
+	out	0xA0, al	/ Put A
+
+	or	ax,1		/ Or the GO command over it
+	out	0xA0, al	
+
+	mov	al,bl
+	or 	al,0x40
+	out	0xA0, al	/ Put the write command again without GO
+	out	0xA0, al	/ Put the write command again without GO
+	out	0xA0, al	/ Put the write command again without GO
+
+	mov	al,bl
+	out	0xA0,al		/ Put out A command without GO or write
+	mov	al,bh
+	out	0xa4,al		/ Clean up C command 
+
+GAPWT:
+	in	al,0xc8		/ Wait for the FBY line to go away
+	test	al,1
+	jne	GAPWT
+
+/	mov	al,'e
+/	push	ax
+/	call	__p_char
+/	pop	ax
+
+	ret
+
+/ Space reverse Block
+
+REVBLK:
+
+	mov	bl,.b [bp][-8]	/ Put the normal status/drive id out
+
+	mov	bh,.b [bp][-10]	/ Load status C
+
+	mov	al,bh		/ Get the C command
+	or	al,0x10		/ Set erase command (space block reverse)
+	out	0xa4, al	/ Put C
+
+	mov	al,bl		/ Get the A command
+	or	al,0x80		/ Reverse forward (space block reverse)
+	out	0xA0, al	/ Put A
+	out	0xA0, al	/ Put A
+	out	0xA0, al	/ Put A
+
+	or	al,1		/ Or the GO command over it
+	out	0xA0, al	
+
+	mov	al,bl
+	or 	al,0x80
+	out	0xA0, al	/ Put the write command again without GO
+	out	0xA0, al	/ Put the write command again without GO
+	out	0xA0, al	/ Put the write command again without GO
+
+	mov	al,bl
+	out	0xA0,al		/ Put out A command without GO or write
+	mov	al,bh
+	out	0xa4,al		/ Clean up C command 
+
+REWWT:
+	in	al,0xc8		/ Wait for the FBY line to go away
+	test	al,1
+	jne	REWWT
+
+/	mov	al,'r
+/	push	ax
+/	call	__p_char
+/	pop	ax
+
+	ret			/ Return	

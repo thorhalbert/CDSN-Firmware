@@ -1,0 +1,61 @@
+$ expand :== $asla$dua0:[scott.chinaproms.stationdoc.listings]expand
+$ define/user sys$output a.tmp
+$ expand CSBOOT.S86
+$ copy a.tmp CSBOOT.S86
+$ define/user sys$output a.tmp
+$ expand CSINIT.S86
+$ copy a.tmp CSINIT.S86
+$ define/user sys$output a.tmp
+$ expand CSCONF.H
+$ copy a.tmp CSCONF.H
+$ define/user sys$output a.tmp
+$ expand CSSTND.H
+$ copy a.tmp CSSTND.H
+$ define/user sys$output a.tmp
+$ expand CSMAIL.H
+$ copy a.tmp CSMAIL.H
+$ define/user sys$output a.tmp
+$ expand CSSTAT.H
+$ copy a.tmp CSSTAT.H
+$ define/user sys$output a.tmp
+$ expand CSMAIN.C
+$ copy a.tmp CSMAIN.C
+$ define/user sys$output a.tmp
+$ expand CS3MIO.H
+$ copy a.tmp CS3MIO.H
+$ define/user sys$output a.tmp
+$ expand CS3MCF.H
+$ copy a.tmp CS3MCF.H
+$ define/user sys$output a.tmp
+$ expand CS3MIO.C
+$ copy a.tmp CS3MIO.C
+$ define/user sys$output a.tmp
+$ expand CSFILT.H
+$ copy a.tmp CSFILT.H
+$ define/user sys$output a.tmp
+$ expand CSCONT.H
+$ copy a.tmp CSCONT.H
+$ define/user sys$output a.tmp
+$ expand CSSEPK.H
+$ copy a.tmp CSSEPK.H
+$ define/user sys$output a.tmp
+$ expand CSEVDT.C
+$ copy a.tmp CSEVDT.C
+$ define/user sys$output a.tmp
+$ expand CS86LB.C
+$ copy a.tmp CS86LB.C
+$ define/user sys$output a.tmp
+$ expand CLEAN.COM
+$ copy a.tmp CLEAN.COM
+$ define/user sys$output a.tmp
+$ expand CDSN.COM
+$ copy a.tmp CDSN.COM
+$ define/user sys$output a.tmp
+$ expand CSCOMP.COM
+$ copy a.tmp CSCOMP.COM
+$ define/user sys$output a.tmp
+$ expand CSLINK.COM
+$ copy a.tmp CSLINK.COM
+$ define/user sys$output a.tmp
+$ expand CSBURN.COM
+$ copy a.tmp CSBURN.COM

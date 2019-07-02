@@ -1,0 +1,62 @@
+
+Primative Plotting Functions:
+
+	Incremental Movement
+
+	Pen Action
+
+	Error Retry/Monitor
+
+	Return Default attributes
+		Page size
+		stepping increments
+		speed
+		acceleration
+
+Advanced Plotting Functions:
+
+	Draw Vector
+
+	Draw Vector with linestyle
+
+	Draw Curves
+		Circles
+		Arcs
+
+	Draw Text
+		Fonts
+
+	Pen Swap
+
+	Clipping/Scaling
+
+	Axis/Margin Set/Reset
+
+	Auto Sheet Feed Commands
+
+	Bit Mapped Operation Commands
+
+-----------------------------
+
+Plotter Attributes:
+
+	Pen Changer
+		# of pens
+
+	Paper Size
+
+	Step Increment
+
+	Speed
+
+	Acceleration
+
+	Pen Lift, Drop Delays
+
+	Automatic Ink Flow Startup
+
+	Continuous Forms/Sheet Feed
+		Paper Size for form feed
+		Auto Sheet Feed/Bin Options
+
+	Bit Mapped Operation

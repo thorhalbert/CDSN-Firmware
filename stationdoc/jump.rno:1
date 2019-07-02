@@ -1,0 +1,418 @@
+.AP
+.F
+.FL HYPHENATE
+.FL CAPITALIZE
+.J
+.PS 60,80
+.LM 12
+.RM 70
+.C;^&Jumper installation for 86/14 board\&
+.SK 2
+.LM +21
+.P -21,0,5
+E1-E2########*#IN###Connects 5 MHZ clock to EFI input on 8284A.
+
+E2-E3########*#OUT##Connects 8 MHZ clock to EFI input on 8284A.
+
+E13-E14########IN###Wait-State selection jumpers for ready circuitry.
+
+E7-E11#########IN###Wait-State jumpers.
+
+E15-E16########IN###Test Jumper.
+
+E17-E18########IN###Test Jumper.
+
+E19############OUT##Input pin to output interrupt signal driver U11 in the 
+interrupt jumper matrix.
+
+E20,#E21#######OUT##Enable either the EXT INTR 0/ signal or +5 volts into the 
+interrupt jumper matrix.
+
+E22-E23########IN###Enables the OVERRIDE/ signal from the status register to 
+control the locking of dual port RAM when installed.
+
+E24-E25########OUT##Enables BUS INTR OUT 1 signal from status register to 
+control the NMI interrupt input to the 8086-2 CPU.
+
+E26-E27########IN###Enables NMI mask signal from status register to control the 
+NMI interrupt input to the 8086-2 CPU.
+
+E28-E32########OUT##Provides programmable control of the GATE input to 8253-2 
+PIT timer 0.
+
+E30-E31########IN###Provides continual enable on GATE input for 8253-5  PIT 
+timer 1.
+
+E31-35#########OUT##Provides programmable control of the GATE input to 
+8253-5 PIT timer 1.
+
+E33-E34######*#IN###Select operation of the interrupt curcuitry in a bus 
+vectored system when installed; remove for exclusively non-bus vector 
+operation.
+
+E36-E37########IN###Selects either 4 MHz clock (installed) or 8 MHz clock 
+(removed) operation for the 8086-2 CPU.
+
+E38-E39######*#IN###Enables generation of the failsafe timeout interrupt 
+request to the 8259A PIC when installed.
+
+E40-E41########IN###Not user configurable.
+
+E42-E43########IN###Disables status latch and edge interrupt flip-flop when 
+installed.
+
+E44-E53,#######IN###
+
+E45-E54,#######IN###
+
+E46-E55,#######IN###
+
+E47-E56,#######IN###
+
+E48-E57,#######IN###
+
+E49-E58,#######IN###
+
+E50-E59,#######IN###
+
+E51-E60########IN###Connects the 8255A PPI port C I/O signals to the J1 
+connector.  (Provides 3M tape drive polling signal from 217B)
+
+E52-E61########IN###Connects the direction control for the 8255A PPI port A 
+I/O singal buffer to ground, selecting output mode when installed.
+
+E62############OUT##TEST signal to 8086-2 CPU
+
+E63############OUT##PA INTR signal imput from the parallel port to the 
+interrupt jumper matrix.
+
+E65,#E66#######OUT##I/O signals to the parity generation Multimodule board.
+
+E67############OUT##EXT CLK input from the parallel port to the 8251A PCI 
+or 8253-5 PIT device.
+
+E68############OUT##STXD signal from the parallel I/O port to eigher the 
+serial I/O port of the clock generator circuitry.
+
+E69############OUT##PFSN/ single input from the P2 connector to the parallel 
+I/O port.
+
+E70-E71########OUT##Enables +5 volts on the auxiliary connector at pin 23 when 
+installed.
+
+E72-E74########OUT##Enables -12 volts on to the auxiliary connector at pin 19
+when installed.
+
+E73-E75########OUT##Enables +12 volts onto the auxiliary connector at pin 22 
+when installed.
+
+E76-E77########OUT##Enables generation of CTS signal from RTS signal on the 
+serial I/O interface.
+
+E78,#E80,#E81##OUT##Configurable I/O line access on the serial I/O interface.
+
+E79############OUT##Output of a signal amplifier; for use when configuring an 
+output onto the serial I/O interface.
+
+E82-E83########OUT##Reserved.
+
+E84-E85########IN###Test Jumper.
+
+E86-E87########OUT##Reserved.
+
+E88-E89,#######IN###
+
+E90-E91,#######IN###
+
+E92-E93,#######IN###
+
+E94-E95,#######IN###
+
+E96-E97-E102,##IN###
+
+E109-E110,#####IN###
+
+E112-E113,#####IN###
+
+E88-E113######IN###ERPROM address and controls; refer to table 2-4 in 86/14 
+reference manual.  Should be configured for 32K proms which start at 0xF8000.
+
+E114-E115######IN###Connects +5 volt battery backup to +5 volt supply.
+
+E116-E117######OUT##Reserved.
+
+E118,##########OUT##
+
+E119-E120######IN###Selects the on-board RAM capacity.
+
+E123-E124-E125#IN###Selects the on-board EPROM capacity.
+
+E126###########OUT##Provides access to the interrupt line, MINTR1, on iSBX Bus 
+connector J3.
+
+E127,#E131,
+
+E128,#E139,
+
+E140,#E142#####OUT##Input signals to the interrupt "OR"ing function in the 
+interrupt jumper matrix.
+
+E129###########OUT##Output pin from interrupt signal driver U11.
+
+E128,#E130#####OUT##OR gate output signals from the interrupt "OR"ing 
+function.
+
+E132###########OUT##PA INTR interrupt signal to interrupt jumper matrix from 
+parallel port I/O.
+
+E133###########OUT##TIMEOUT INTR signal to interrupt jumper matrix from 
+failsafe timer.
+
+E134###########OUT##Input to IR7 interrupt level of PIC.
+
+E135###########OUT##Input to edge-interrupt latching flip-flop U32.
+
+E136###########OUT##Input to IR3 interrupt level of PIC.
+
+E137###########OUT##SBX2 INT0 interrupt signal to the interrupt jumper matrix.
+
+E141###########OUT##TIMER 1 INTR interrupt signal to interrupt jumper matrix 
+from PIT counter 1.
+
+E143###########OUT##PB INTR interrupt signal to the interrupt jumper matrix 
+from parallel port.
+
+E144-E145######IN###Disables NMI interrupt input to 8086-2 CPU when installed.
+
+E146###########OUT##LEVEL INTR interrupt signal to the interrupt jumper matrix 
+from the edge-to-level interrupt conversion flip-flop U32.
+
+E147-E158######IN###Connects the TIMER 0 INTR interrupt signal from the 
+counter 0 output of the 8253-5 PIT to the IR2 interrupt level in the PIC.
+
+E148,#E149,
+
+E150,#E151,
+
+E159,#E160,
+
+E161,#E162#####OUT##Output jumpers from the octal 3-state line driver/receiver 
+device interfacing the Multibus interrupt signals to the jumper interrupt 
+matrix.
+
+E151-E152####*#OUT##Input to IR5 interrupt level of PIC.
+
+E153###########OUT##RxRDY interrupt signal to the interrupt jumper matrix from 
+the 8251A PCI device.
+
+E154###########OUT##TxRDY interrupt signal to the interrupt jumper matrix from 
+the 8251A PCI device.
+
+E155###########OUT##Input to IR6 interrupt level of PIC.
+
+E156###########OUT##SBX1 INT0 interrupt signal to the interrupt jumper matrix 
+from iSBX connector J4.
+
+E157###########OUT##Input to IR4 interrupt level of PIC.
+
+E163###########OUT##POWER LINE CLOCK signal from P2 connector.
+
+E164###########OUT##Input to IR1 interrupt level of PIC.
+
+E165###########OUT##Input to IR0 interrupt level of PIC.
+
+E166###########OUT##MINT interrupt signal input to the interrupt jumper matrix 
+from the iSBC 337 numeric data processor.
+
+E167###########OUT##PARITY INTR signal to the interrupt jumper matrix from the 
+iSBC 303 parity generator/checker multimodule board.
+
+E168###########OUT##PFI input signal from the power fail sense circuitry.
+
+E169###########OUT##SBX1 INT1 iterrupt signal input to the interrupt jumper 
+matrix.
+
+E170###########OUT##OPT0 option signal from iSBX bus connector J4.
+
+E172,#E173,
+
+E174###########OUT##Select either 8-bit or 16-bit operation of the iSBX bus 
+interfaces at multimodule connectors J3 and J4.
+
+E175-E176######IN###Selects 1.23 MHz clock input frequency for counter 0 
+of the 8253-5 PIT device.
+
+E177###########OUT##
+
+E178-E179######IN###Selects 1.23 MHz clock input frequency for counter 2 of 
+the 8253-5 PIT device.
+
+E180###########OUT##Output from counter 1 of the 8253-5 PIT.
+
+E181###########OUT##Output from counter 0 of the 8253-5 PIT device.
+
+E182###########OUT##EXT CLK signal to the Port C output of the 8244A PPI 
+device.
+
+E183###########OUT##2.46 MHz clock signal.
+
+E184-E185######IN###Selects 156.3 KHz clock input frequency for counter 1 of 
+the 8253-5 PIT device.
+
+E186,#E187#####OUT##Secondary Transmit clock input signal to the serial I/O 
+logic from the serial interface connector J2.
+
+E188###########OUT##Provides access to the receive clock (RxC) signal at the 
+8241A PCI device.
+
+E189-E193######IN###Connects the data terminal ready signal from the serial 
+interface to the data set ready input on the 8241A PCI.
+
+E190-E194######IN###Selects the transmit clock (TxC) from counter 2 of the PIT 
+for operating the 8251A PCI.
+
+E191-E195######IN###Selects the receive clock (TxC) from counter 2 of the PIT 
+for operating the 8251A PCI.
+
+E192###########OUT##Input to the signal amplifier U24 for the serial 
+interface.
+
+E196###########OUT##Provides access to the STDX signal on the serial I/O port.
+
+E197-E198######OUT##Reserved.
+
+E199-E200######OUT##Reserves access to all on-board RAM; no on-board RAM is 
+allowed to be dual port memory when installed.
+
+E201-E202,#####OUT
+
+E202-E203######IN###Configures a Multibus arbitration scheme by providing 
+options for ANY REQUEST signal input to 8289.
+
+E204-E206######OUT##Provides the ability to drive the on board LOCK/ signal 
+onto the Multibus interface if required.
+
+E205-E207######OUT##Provides BCLK/ system clock onto the Multibus interface 
+when installed.
+
+E208-E209######OUT##Provides CCLK/ system clock onto the Multibus interface 
+when installed.
+
+E210-E211######OUT##Connects BPRO/ signal generated on-board to the Multibus 
+interface when installed.
+
+E213-E214####*#OUT##Connects CBRQ/ signal generated on-board to the Multibus 
+interface when installed.
+
+E213-E212######IN###Connects the on-board CBRQ/ input to ground.
+
+E215,#E216,
+
+E217,#E219#####OUT##Ground connections for the megabyte page select jumpers.
+
+E220,#E221
+
+E222,#E224#####OUT##Selects the megabyte page address at which the on-board 
+memory is located.
+
+E218-E223####*#IN###Enables access of a 16 megabyte address range of 
+off-board resources.
+
+E225###########OUT##Configures the state of ADR13/ in generating an off-board 
+RAM select.
+
+E226###########OUT##Configures the state of ADR12/ in generating an off-board 
+RAM select.
+
+E227###########OUT##Configures the state of ADR11/ in gererating an off-board 
+RAM select.
+
+E219-E225####*#OUT##
+
+E228-E229######IN###Factory configured jumpers; non-user configurable.
+
+E230-E231,#####IN###
+
+E232-E233,#####OUT##
+
+E240-E241,#####IN###
+
+E242-E243######OUT##Select the ending dual port RAM address.
+
+E234-E234,#####OUT##
+
+E236-E237######OUT##Selects the amount of dual port memory on-board that is 
+accessible from the Multibus interface.
+
+E238-E239######OUT##Enables loading the upper 4 bits of a 24 bit address into 
+the megabyte page select register when installed.
+
+E244,#E245#####OUT##
+
+E246,#E247,
+
+E248,#E249,
+
+E250,#E251,
+
+E252,#E253#####OUT##Provides access to the inputs of the 3-state octal 
+transceiver buffering the Multibus interrupt lines (INT0/ through INT7/).
+
+E254-E255,#####OUT##
+
+E255-E256,#####IN###
+
+E257-E258,#####IN###
+
+E259,##########OUT##
+
+E260-E261,#####IN###
+
+E260,##########OUT##Non-user configurable jumpers that select the address 
+decode mode for the 3625A decode PROM.
+
+E273-E275,#####IN###
+
+E274-E276,#####IN###
+
+E270-E272,#####IN###
+
+E263,#E264,
+
+E265,#E266,
+
+E267,#E268,
+
+E269,#E271#####OUT##Non-user configurable jumpers that select the 8203 RAM 
+controller mode of operation.
+
+E277-E278######IN###Connects the +5v bus to the +5v battery backup bus when 
+installed.
+
+E279###########OUT##Provides more conditions on generation of the TIME OUT 
+INTR/ signal for use with iRMX 86 software.  The ORing of E279-E133 via the 
+"OR" function provided in the interrupt jumper matrix disables a failsafe 
+timeout restart when executing a HALT instruction under iRMX 86 software.
+
+.sk 1
+.LM -21
+.c;^&Special jumpers\&
+.SK 1
+.P 0,0,5
+Wire Jumper from Pin 1 of U20 to jumper E171 should be installed to provide
+actual handshake signal for buffer ready from 217B to machine.  This is
+programmed through the parallel port. 
+.sk 1
+.c;^&Legend of symbols in the connection field\&
+.sk 1
+.lm +10
+.p -5,1,5
+IN###Jumper should be installed between these two jumper pins denoted by the 
+E number.
+
+OUT##No jumper or connection should be present between the two E jumper pins.
+
+*####This means that the configuration at this point for the CDSN 
+installation is different from the normal factory settings.  This is for 
+quick configuration from a stock board.
+

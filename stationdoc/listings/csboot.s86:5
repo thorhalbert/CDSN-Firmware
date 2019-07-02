@@ -1,0 +1,17 @@
+\begin{verbatim}
+/       CDSN - BOOTUP.S - Actual boot location in prom
+/       Far jump to start of prom where boot routines are
+
+        .public BOOT
+
+        promseg = 0xF800        / Prom starting segment
+
+        .text
+
+BOOT:   
+        .byte 0xEA      / Inter segment jump
+        .word 0         / Far jump to beginning of prom
+        .word promseg   / Here is the segment start
+
+        .even
+\end{verbatim}

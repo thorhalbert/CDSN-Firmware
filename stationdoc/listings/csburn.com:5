@@ -1,0 +1,201 @@
+\begin{verbatim}
+.; Build CDSN package and burn proms in a DATA I/O 29 series programmer
+.;
+        .ENABLE QUIET
+        SET TT: QUIET
+        .SETN SEQNUM 0
+        .SETD SEQNUM
+        .TESTFILE DK:BUILD.SEQ
+        .IF <FILERR> = 346 .GOTO WRTFIL
+        .IF <FILERR> <> 1 .GOTO SEQBAD
+        .OPENR DK:BUILD.SEQ
+        .READ SEQSTR
+        .CLOSE
+        .SETN SEQNUM 'SEQSTR'.
+.WRTFIL:
+        .INC SEQNUM
+        .OPEN DK:BUILD.SEQ
+        .DATA 'SEQNUM'
+        .CLOSE
+        ;'<TIME>'
+.ALLDSK:
+        .TESTFILE T:HEX.SAV
+        .IF <FILERR> = 1 .GOTO PRTRDY
+        .ASK [<TRUE>] READY Is the Whitesmith Cusp disk in DY1:
+        .IFF READY ;    Please put the Whitesmith Cusp disk in DY1:
+        ;
+        .GOTO ALLDSK
+.PRTRDY:
+        .ASK [<FALSE>] READY Is the prom burner ready in remote mode
+        .IFT READY .GOTO SRTPRG
+        ;
+        ;       Hook up DATA I/O 29 series programmer to the LP: port, turn on
+        ;       and hit SELECT F B START START to set up in remote mode
+        ;
+        .GOTO PRTRDY
+
+.SRTPRG:
+
+        ;
+        ;'<TIME>'               [Set to motorola programming mode]
+        .OPEN LP:TEMP.TMP
+        .DATA SE B3 87
+        .CLOSE
+        .GOSUB PAUSE
+        .OPEN LP:TEMP.TMP
+        .DATA SE B3 87
+        .CLOSE
+        .GOSUB PAUSE
+        ;'<TIME>'               [Set to Hex Mode]
+        .OPEN LP:TEMP.TMP
+        .DATA SE F7
+        .CLOSE
+        .GOSUB PAUSE
+        ;'<TIME>'               [Fill Memory with FF's]
+        .OPEN LP:TEMP.TMP
+        .DATA SE A2 FF
+        .CLOSE
+        .GOSUB PAUSE
+        .GOSUB PAUSE
+
+        .SETT FIRSP
+
+.FSTPRM:
+        ;
+        .IFF FIRSP .GOTO FSTIDN
+        ;'<TIME>'       ***** Ready to make #1 86/14 U58 LO order 27128A prom *****
+        ;
+        .GOTO FSTMES
+
+.FSTIDN:
+        ;'<TIME>'       Wait until programmer is finished burning....
+        .ASK [<FALSE>] READY Do you wish to make another identical prom
+        .IFF READY      .GOTO SECSTR
+
+.FSTMES:
+        .ASK [<TRUE>] READY Is the prom inserted and ready in programmer
+        .IFF READY      .GOTO FSTIDN
+        .SETF FIRSP
+
+        ;
+        ;'<TIME>'               [Loading Main Program]
+
+        .OPEN LP:TEMP.TMP
+        .DATA CO PO 0000 0000 TO RA 0000
+        .CLOSE
+        .GOSUB PAUSE
+        
+        .OPEN TEMP.TMP
+        .DATA run t:hex
+        .DATA -s -2 +0 -tb0x0000 -db0x2E00 >lp: cdsn.wsl
+        .CLOSE
+
+        $@TEMP.TMP
+        
+        ;'<TIME>'               [Loading Bootstrap Section]
+
+        .OPEN LP:TEMP.TMP
+        .DATA CO PO 0000 0000 TO RA 3FF8
+        .CLOSE
+        .GOSUB PAUSE
+        
+        .OPEN TEMP.TMP
+        .DATA S00D00006373626F6F742E77736CE4
+        .DATA S1060000EA00F817
+        .DATA S9030000FC
+        .CLOSE
+
+        COPY/NOLOG TEMP.TMP LP:
+        
+        .GOSUB PAUSE
+        ;'<TIME>'               [Burning Prom #1 U58 LO]
+
+        .OPEN LP:TEMP.TMP
+        .DATA CO RA 0000 0000 TO DEV 0000 9351
+        .CLOSE
+        .GOSUB PAUSE
+
+        .GOTO FSTPRM
+.SECSTR:
+        .SETT FIRSP
+
+.SECPRM:
+        ;
+        .IFF FIRSP .GOTO SECIDN
+        ;'<TIME>'       ***** Ready to make #2 86/14 U40 HI order 27128A prom *****
+        ;
+        .GOTO SECMES
+
+.SECIDN:
+        ;       Wait until programmer is finished burning....
+        .ASK [<FALSE>] READY Do you wish to make another identical prom
+        .IFF READY      .GOTO DONPRM
+
+.SECMES:
+        .ASK [<TRUE>] READY Is the prom inserted and ready in programmer
+        .IFF READY      .GOTO SECMES
+        .SETF FIRSP
+
+        ;
+        ;'<TIME>'               [Fill Memory with FF's]
+        .OPEN LP:TEMP.TMP
+        .DATA SE A2 FF
+        .CLOSE
+        .GOSUB PAUSE
+        .GOSUB PAUSE
+        .GOSUB PAUSE
+        .GOSUB PAUSE
+        .GOSUB PAUSE
+        .GOSUB PAUSE
+        ;'<TIME>'               [Loading Main Program]
+
+        .OPEN LP:TEMP.TMP
+        .DATA CO PO 0001 0000 TO RA 0000
+        .CLOSE
+        .GOSUB PAUSE
+        
+        .OPEN TEMP.TMP
+        .DATA run t:hex
+        .DATA -s -2 +1 -tb0x0000 -db0x2E00 >lp: cdsn.wsl
+        .CLOSE
+
+        $@TEMP.TMP
+        
+        ;'<TIME>'               [Loading Bootstrap Section]
+
+        .OPEN LP:TEMP.TMP
+        .DATA CO PO 0001 0000 TO RA 3FF8
+        .CLOSE
+        .GOSUB PAUSE
+        
+        .OPEN TEMP.TMP
+        .DATA S00D00006373626F6F742E77736CE4
+        .DATA S1060001000000F8
+        .DATA S9030000FC
+        .CLOSE
+
+        COPY/NOLOG TEMP.TMP LP:
+
+        .GOSUB PAUSE
+
+        ;'<TIME>'               [Burning Prom #2 U40 HI]
+
+        .OPEN LP:TEMP.TMP
+        .DATA CO RA 0000 4000 TO DEV 0000 9351
+        .CLOSE
+        .GOSUB PAUSE
+
+        .GOTO SECPRM
+
+.DONPRM:
+.FINISH:
+        SET TT: NOQUIET
+        .EXIT
+
+.PAUSE: .OPEN TEMP.TMP
+        .CLOSE
+        .RETURN
+.SEQBAD:
+        ;Cannot process build.seq
+        .STOP
+\end{verbatim}

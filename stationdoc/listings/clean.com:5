@@ -1,0 +1,12 @@
+\begin{verbatim}
+! Clean the disk of all but source and squeeze it
+! Don't do this if you want to keep your loader files, copy them elsewhere
+!
+        DEL/INFO/NOQ SRC:*.(O,BAK,WSL,HEX)
+        DEL/INFO/NOQ SRC:*.(LDA,MAP,STB,TMP)
+        DEL/INFO/NOQ SRC:*.(TEM,MOT)
+        DEL/INFO/NOQ SRC:L00200.DAT
+        SQ SRC:/NOQ
+        DIR/FULL SRC:
+
+\end{verbatim}

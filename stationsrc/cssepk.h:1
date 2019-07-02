@@ -1,0 +1,127 @@
+/*----------------------------------------------------------------------*
+ *  C h i n a   D i g i t a l   S e i s m o g r a p h   N e t w o r k	*
+ *									*
+ *	CSSEPK.H - Sensor packet definitions for event detector 	*
+ *----------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------*
+ *	Modification and history of CSSEPK.H				*
+ *									*
+ *-----Edit---Date----Who-------Description of changes------------------*
+ *	001    Jul-85 JNM	Pre-History				*
+ *	002  1-Aug-85 SH	Add macros to decode header info	*
+ *	003 11-Sep-85 SH	Add the onset descriptor		*
+ *	004  6-Feb-86 SH	Forgot to put lookback in onset desc	*
+ *	005  7-Apr-86 SH	Add previous year to r_time for wraps	*
+ *	006  7-Apr-86 SH	Maximum data space needed		*
+ *	007  9-Apr-86 SH	Move the time structure out of here	*
+ *----------------------------------------------------------------------*/
+
+/*	Define symbol SRO for SRO format - default is CDSN format	*/
+
+#ifndef SRO	/* Define CDSN format */
+
+#define RSTN			/* CDSN always uses RSTN count values */
+#define SAM_REC 1014		/* Number of WORDS in data area of record */
+#define MAX_SAM (SAM_REC/3)	/* Number of actual data elements */
+#define SAM_RBY 2028		/* Number of BYTES in data area of record */
+#define DBF_SIZ 2048		/* Size of a data record in bytes */
+#define YEAR1D			/* There is a tens place defined in year */
+
+struct rec_str {
+	BYTE hedbuf[20];	/* The header region */
+	BYTE datbuf[SAM_RBY];	/* The actual sample area */
+};
+
+#define nibmsk 0xF				/* Four bit nibble mask */
+#define lefnib(y,c)	((y->hedbuf[c-1]>>4)&nibmsk) /* Get the left nibble */
+#define rignib(y,c)	(y->hedbuf[c-1]&nibmsk)	/* Right half nibble */
+
+#define staid2(x)	lefnib(x,1)	/* 100's of station id */
+#define staid1(x)	rignib(x,1)	/* 10's of station id */
+#define staid0(x)	lefnib(x,2)	/* 1's of station id */
+#define year1(x)	rignib(x,2)	/* 10's of year */
+#define year0(x)	lefnib(x,3)	/* 1's of year */
+#define day2(x)		rignib(x,3)	/* 100's of day */
+#define day1(x)		lefnib(x,4)	/* 10's of day */
+#define day0(x)		rignib(x,4)	/* 1's of day */
+#define hour1(x)	lefnib(x,5)	/* 10's of hours */
+#define hour0(x)	rignib(x,5)	/* 1's of hours */
+#define minut1(x)	lefnib(x,6)	/* 10's of minutes */
+#define minut0(x)	rignib(x,6)	/* 1's of minutes */
+#define secon1(x)	lefnib(x,7)	/* 10's of seconds */
+#define secon0(x)	rignib(x,7)	/* 1's of seconds */
+#define milli2(x)	lefnib(x,8)	/* 100's of milliseconds */
+#define milli1(x)	rignib(x,8)	/* 10's of milliseconds */
+#define chanl0(x)	rignib(x,9)	/* Number of channels */
+#define eventfg(x)	(x->hedbuf[11]&0x10)	/* Set for beg of event */
+#define samr1(x)	lefnib(x,17)	/* 10's of sample rate */
+#define samr0(x)	rignib(x,17)	/* 1's of sample rate */
+#define samrt(x)	lefnib(x,18)	/* Tenths of sample rate */
+#define ampl5(x)	rignib(x,18)	/* 100,000 amplitude */
+#define ampl4(x)	lefnib(x,19)	/* 10,000 amplitude */
+#define ampl3(x)	rignib(x,19)	/* 1,000 amplitude */
+#define ampl2(x)	lefnib(x,20)	/* 100 amplitude */
+#define ampl1(x)	rignib(x,20)	/* 10 amplitude */
+
+#endif
+#ifdef SRO		/* Define the SRO format version */
+
+#ifndef RSTN
+#define SRODF		/* Default to SRO data format */
+#endif
+
+#define SAM_REC 990		/* Number of WORDS in data area of record */
+#define MAX_SAM SAM_REC		/* Number of actual data elements */
+#define SAM_RBY 1980		/* Number of BYTES in data area of record */
+#define DBF_SIZ 2000		/* Size of a data record in bytes */
+#define EPOCH 83		/* Default century for years in SRO format */
+
+struct rec_str {
+	BYTE hedbuf[20];	/* The header region */
+	BYTE datbuf[SAM_RBY];	/* The actual sample area */
+};
+
+#define nibmsk 0xF				/* Four bit nibble mask */
+#define lefnib(y,c)	((y->hedbuf[c-1]>>4)&nibmsk) /* Get the left nibble */
+#define rignib(y,c)	(y->hedbuf[c-1]&nibmsk)	/* Right half nibble */
+
+#define staid1(x)	lefnib(x,1)	/* 10's of station id */
+#define staid0(x)	rignib(x,1)	/* 1's of station id */
+#define samr1(x)	lefnib(x,2)	/* 10's of sample rate */
+#define samr0(x)	rignib(x,2)	/* 1's of sample rate */
+#define year0(x)	lefnib(x,3)	/* 1's of year */
+#define day2(x)		rignib(x,3)	/* 100's of day */
+#define day1(x)		lefnib(x,4)	/* 10's of day */
+#define day0(x)		rignib(x,4)	/* 1's of day */
+#define hour1(x)	lefnib(x,5)	/* 10's of hours */
+#define hour0(x)	rignib(x,5)	/* 1's of hours */
+#define minut1(x)	lefnib(x,6)	/* 10's of minutes */
+#define minut0(x)	rignib(x,6)	/* 1's of minutes */
+#define secon1(x)	lefnib(x,7)	/* 10's of seconds */
+#define secon0(x)	rignib(x,7)	/* 1's of seconds */
+#define milli2(x)	lefnib(x,8)	/* 100's of milliseconds */
+#define milli1(x)	rignib(x,8)	/* 10's of milliseconds */
+#define chanl1(x)	lefnib(x,9)	/* 10's of # of channels (Unused) */
+#define chanl0(x)	rignib(x,9)	/* 1's of # of channels */
+
+#endif
+
+struct s_onset {
+	BOOL new_onset;		/* Set to TRUE if this is a new onset */
+	TEXT o_polar;		/* Polarity of the onset (single char) */
+	WORD o_look;		/* [004] Don't forget the lookback */
+	BYTE o_snr[5];		/* SNR bytes */
+	WORD o_year;		/* Year of the onset */
+	WORD o_days;		/* Year-Julian day number of day */
+	WORD o_hours;		/* Hours of onset GMT */
+	WORD o_mins;		/* Minutes of onset */
+	WORD o_secs;		/* Seconds of onset */
+	WORD o_msecs;		/* Milliseconds of onset */
+	DWORD o_amps;		/* Amplitude of the onset */
+	WORD o_pl;		/* Whole part of the period */
+	DWORD o_pr;		/* Fractional part of the period */
+	DWORD o_large;		/* twosd, background noise */
+};
+
+#define ONSETI struct s_onset 
